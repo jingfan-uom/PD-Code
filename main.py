@@ -8,7 +8,7 @@ import core_funcs as cf
 import plot_utils as plot
 
 # ------------------------
-# 11Physical and simulation parameters
+# Physical and simulation parameters
 # ------------------------
 k_mat = 50.0             # Thermal conductivity (W/m·K)
 rho_mat = 7850.0         # Density (kg/m³)

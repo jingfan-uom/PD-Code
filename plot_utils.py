@@ -4,6 +4,7 @@ import numpy as np
 def temperature(R_all, Z_all, T, total_time, nsteps):
     T_min = np.min(T)
     T_max = np.max(T)
+
     plt.figure(figsize=(6, 5))
     levels = np.linspace(340, 500, 17)
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')

@@ -27,7 +27,7 @@ def partial_area_of_cell_in_circle(x_cell_center, z_cell_center, dx, dz,
                 count_in += 1
     return (count_in / (sub * sub)) * dx * dz  # Fractional area within the circle
 
-# Construct the area overlap matrix between every point and its neighbors within the horizon
+#  Construct the area overlap matrix between every point and its neighbors within the horizon
 def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
     N = len(x_flat)
     area_mat = np.zeros((N, N), dtype=float)
