@@ -1,119 +1,138 @@
-import sys
-import os
-sys.path.append(os.path.dirname(__file__))
-
 import numpy as np
-import time
-import core_funcs as cf
-import plot_utils as plot
 
-# ------------------------
-# Physical and simulation parameters
-# ------------------------
-k_mat = 50.0             # Thermal conductivity (W/m·K)
-rho_mat = 7850.0         # Density (kg/m³)
-Cp_mat = 420.0           # Specific heat capacity (J/kg·K)
-Lr, Lz = 0.8, 0.8        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 40          # Number of cells in r and z directions
-dr, dz = Lr / Nr, Lz / Nz    # Cell size in r and z
-delta = 3 * dr           # Horizon radius for nonlocal interaction
-ghost_nodes = 3          # Number of ghost cells for boundary treatment
+# Compute the shape factor matrix for all pairs (i, j) within the horizon
+# This weight is used in nonlocal thermal conductivity calculations
+def compute_shape_factor_matrix(Rmat, true_indices):
+    r_flat = Rmat.flatten()
+    shape_factor_matrix = np.zeros((len(r_flat), len(r_flat)))
+    for i, j in zip(*true_indices):
+        shape_factor_matrix[i, j] = (2 * r_flat[j]) / (r_flat[i] + r_flat[j])
+    return shape_factor_matrix
 
-# ------------------------
-# Construct grid coordinates (including ghost layers)
-# ------------------------
-r_start = 0.2  # Start position in r-direction
+# Estimate the overlapping area between a rectangular cell and a circular horizon using sub-grid sampling
+def partial_area_of_cell_in_circle(x_cell_center, z_cell_center, dx, dz,
+                                   x_circle_center, z_circle_center, delta):
+    sub = 10  # Subdivisions per dimension (total sub*sub sampling points)
+    step_x = dx / sub
+    step_z = dz / sub
+    x0 = x_cell_center - 0.5 * dx  # Bottom-left x corner of cell
+    z0 = z_cell_center - 0.5 * dz  # Bottom-left z corner of cell
+    count_in = 0  # Count how many sample points are inside the circle
+    for ix in range(sub):
+        for iz in range(sub):
+            x_samp = x0 + (ix + 0.5) * step_x
+            z_samp = z0 + (iz + 0.5) * step_z
+            dist2 = (x_samp - x_circle_center) ** 2 + (z_samp - z_circle_center) ** 2
+            if dist2 <= delta ** 2 + 1e-6:
+                count_in += 1
+    return (count_in / (sub * sub)) * dx * dz  # Fractional area within the circle
 
-# Physical domain (excluding ghost)
-r_phys = np.linspace(r_start + dr / 2, r_start + Lr - dr / 2, Nr)
-# Left and right ghost layers in r-direction
-r_ghost_left = np.linspace(r_start - ghost_nodes * dr + dr / 2, r_start - dr / 2, ghost_nodes)
-r_ghost_right = np.linspace(r_start + Lr + dr / 2, r_start + Lr + dr / 2 + (ghost_nodes - 1) * dr, ghost_nodes)
+# Construct the area overlap matrix between every point and its neighbors within the horizon
+def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
+    N = len(x_flat)
+    area_mat = np.zeros((N, N), dtype=float)
+    for i in range(N):
+        cx, cz = x_flat[i], z_flat[i]  # Center of the circle (i)
+        for j in range(N):
+            dist = distance_matrix[i, j]
+            if dist > delta + 1e-6:
+                area_mat[i, j] = 0.0  # Definitely outside
+            elif dist <= (delta - 0.5 * dx + 1e-6):
+                area_mat[i, j] = dx * dz  # Entire cell inside circle
+            else:
+                xj, zj = x_flat[j], z_flat[j]
+                area_mat[i, j] = partial_area_of_cell_in_circle(xj, zj, dx, dz, cx, cz, delta)
+    return area_mat
 
-# Physical domain in z-direction (top to bottom)
-z_phys = np.linspace(Lz - dz / 2, dz / 2, Nz)
-# Top and bottom ghost layers
-z_ghost_top = np.linspace(Lz + (ghost_nodes - 1) * dz + dz / 2, Lz + dz / 2, ghost_nodes)
-z_ghost_bot = np.linspace(0 - dz / 2, -ghost_nodes * dz + dz / 2, ghost_nodes)
+# Return thermal conductivity field (assumed constant here)
+def get_thermal_conductivity(Tarr, k_mat, delta):
+    pi = np.pi
+    return np.full_like(Tarr, k_mat * 4 / pi / delta / delta)
 
-# Combine full coordinates
-r_all = np.concatenate([r_ghost_left, r_phys, r_ghost_right])
-z_all = np.concatenate([z_ghost_top, z_phys, z_ghost_bot])
+# Build a matrix of pairwise thermal conductivities for each i-j pair within the horizon
+def compute_thermal_conductivity_matrix(Tarr, k_mat, delta, r_flat, horizon_mask, true_indices):
+    lambda_flat = get_thermal_conductivity(Tarr.flatten(), k_mat, delta)
+    N = len(r_flat)
+    thermal_conductivity_matrix = np.zeros((N, N))
+    for i, j in zip(*true_indices):
+        thermal_conductivity_matrix[i, j] = (
+            2 * lambda_flat[i] / (lambda_flat[i] + lambda_flat[j]) * lambda_flat[j])
+    return thermal_conductivity_matrix
 
-Nr_tot = len(r_all)
-Nz_tot = len(z_all)
+# Convert temperature to enthalpy
+def get_enthalpy(Tarr, rho, Cp):
+    return rho * Cp * Tarr
 
-# Generate 2D meshgrid
-Rmat, Zmat = np.meshgrid(r_all, z_all, indexing='xy')
+# Convert enthalpy back to temperature
+def get_temperature(Harr, rho, Cp):
+    return Harr / (rho * Cp)
 
-# ------------------------
-# Compute distance matrix and horizon mask
-# ------------------------
-r_flat = Rmat.flatten()
-z_flat = Zmat.flatten()
+# Construct the global conductivity matrix K for nonlocal heat transfer
+def build_K_matrix(Tarr, compute_thermal_conductivity_matrix, factor_mat,
+                   partial_area_matrix, shape_factor_matrix,
+                   distance_matrix, horizon_mask, true_indices, r_flat, k_mat, delta):
+    N = len(r_flat)
+    cond_mat = compute_thermal_conductivity_matrix(Tarr, k_mat, delta, r_flat, horizon_mask, true_indices)
+    K1 = np.zeros((N, N))
 
-# Compute pairwise distances between all points
-dx_r = r_flat[:, None] - r_flat[None, :]
-dx_z = z_flat[:, None] - z_flat[None, :]
-distance_matrix = np.sqrt(dx_r ** 2 + dx_z ** 2)
+    # Off-diagonal terms (i ≠ j)
+    valid_offdiag = horizon_mask & (~np.eye(N, dtype=bool))
+    K1[valid_offdiag] = (
+        factor_mat[valid_offdiag] *
+        partial_area_matrix[valid_offdiag] *
+        shape_factor_matrix[valid_offdiag] *
+        cond_mat.T[valid_offdiag] /
+        (distance_matrix[valid_offdiag] ** 2)
+    )
 
-# Mask: which points are within the horizon (excluding self)
-horizon_mask = (distance_matrix > 0) & (distance_matrix <= delta + 1e-6)
-true_indices = np.where(horizon_mask)  # Optional: for indexing optimization
+    # Diagonal terms to ensure row sums to zero
+    valid_diag = horizon_mask & (~np.eye(N, dtype=bool))
+    DiagTerm = np.zeros((N, N))
+    DiagTerm[valid_diag] = factor_mat[valid_diag] * (
+        partial_area_matrix[valid_diag] *
+        shape_factor_matrix[valid_diag] *
+        cond_mat[valid_diag] * (-1.0) /
+        (distance_matrix[valid_diag] ** 2)
+    )
+    row_sum = DiagTerm.sum(axis=1)
+    np.fill_diagonal(K1, row_sum)
+    return K1
 
-# ------------------------
-# Preprocessing: shape factors, area weights, correction factors
-# ------------------------
-shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
-partial_area_matrix = cf.compute_partial_area_matrix(r_flat, z_flat, dr, dz, delta, distance_matrix)
-threshold_distance = np.sqrt(2) * dr
-factor_mat = np.where(distance_matrix <= threshold_distance, 1.125, 1.0)  # Local adjustment factor
+# Apply mixed boundary conditions (mirror and Dirichlet) to temperature array
 
-# ------------------------
-# Temperature update function
-# ------------------------
-def update_temperature(Tcurr, Hcurr, Kmat):
-    flux = Kmat @ Tcurr.flatten() * dt               # Apply nonlocal heat flux
-    flux = flux.reshape(Nz_tot, Nr_tot)              # Reshape back to 2D
-    Hnew = Hcurr + flux                              # Update enthalpy
-    Tnew = cf.get_temperature(Hnew, rho_mat, Cp_mat) # Convert to temperature
-    Tnew = cf.apply_mixed_bc(Tnew, z_all, Nr_tot, Nz_tot, ghost_nodes)  # Apply BC
-    return Tnew, Hnew
+def apply_mixed_bc(Tarr, z_all, Nr_tot, Nz_tot, ghost_nodes):
+    # Bottom ghost layers reflect interior
+    ghost_inds_bottom = np.arange(ghost_nodes)
+    interior_inds_bottom = 2 * ghost_nodes - ghost_inds_bottom - 1
+    Tarr[ghost_inds_bottom[:, None], :] = Tarr[interior_inds_bottom[:, None], :]
 
-# ------------------------
-# Initialization
-# ------------------------
-T = np.full(Rmat.shape, 200)  # Initial temperature field (uniform 200 K)
-T = cf.apply_mixed_bc(T, z_all, Nr_tot, Nz_tot, ghost_nodes)  # Apply boundary conditions
-H = cf.get_enthalpy(T, rho_mat, Cp_mat)  # Initial enthalpy
-Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
-                         partial_area_matrix, shape_factor_matrix,
-                         distance_matrix, horizon_mask, true_indices, r_flat,
-                         k_mat, delta)  # Initial stiffness matrix
+    # Top ghost layers reflect interior
+    ghost_inds_top = np.arange(Nz_tot - 1, Nz_tot - ghost_nodes - 1, -1)
+    i_local = np.arange(ghost_nodes)
+    interior_inds_top = (Nz_tot - 1) - (2 * ghost_nodes - i_local - 1)
+    Tarr[ghost_inds_top[:, None], :] = Tarr[interior_inds_top[:, None], :]
 
-# ------------------------
-# Simulation loop settings
-# ------------------------
-dt = 10                     # Time step (s)
-total_time = 5 * 3600     # Total simulation time (10 hours)
-nsteps = int(total_time / dt)
-print_interval = int(10 / dt)  # Print progress every 10 seconds of simulated time
+    # Left ghost columns reflect interior
+    ghost_inds_left = np.arange(ghost_nodes)
+    interior_inds_left = 2 * ghost_nodes - ghost_inds_left - 1
+    Tarr[:, ghost_inds_left] = Tarr[:, interior_inds_left]
 
-print(f"Total steps: {nsteps}")
-start_time = time.time()
+    # Right ghost columns reflect interior
+    ghost_inds_right = np.arange(Nr_tot - 1, Nr_tot - ghost_nodes - 1, -1)
+    j_local = np.arange(ghost_nodes)
+    interior_inds_right = (Nr_tot - 1) - (2 * ghost_nodes - j_local - 1)
+    Tarr[:, ghost_inds_right] = Tarr[:, interior_inds_right]
 
-# ------------------------
-# Time-stepping loop
-# ------------------------
-for step in range(nsteps):
-    T, H = update_temperature(T, H, Kmat)
-    if step % print_interval == 0:
-        print(f"Step={step}, Simulated time={step * dt:.2f}s")
+    # Partial Dirichlet condition on right edge (region 0.3 <= z <= 0.5)
+    T_hot = 500.0
+    z_mask = (z_all >= 0.3 - 1e-6) & (z_all <= 0.5 + 1e-6)
+    z_sel = np.where(z_mask)[0]  # Affected z rows
+    ghost_cols = np.arange(Nr_tot - 1, Nr_tot - ghost_nodes - 1, -1)  # Ghost columns on right
+    i_local = np.arange(ghost_nodes)
+    offsets = 2 * ghost_nodes - 1 - 2 * i_local
+    interior_cols = ghost_cols - offsets
 
-end_time = time.time()
-print(f"Calculation finished, elapsed real time={end_time - start_time:.2f}s")
+    # Apply mirrored temperature to enforce Dirichlet BC: T_ghost = 2*T_hot - T_interior
+    Tarr[z_sel[:, None], ghost_cols[None, :]] = 2.0 * T_hot - Tarr[z_sel[:, None], interior_cols[None, :]]
 
-# ------------------------
-# Post-processing: visualization
-# ------------------------
-plot.temperature(Rmat, Zmat, T, total_time, nsteps)
+    return Tarr
