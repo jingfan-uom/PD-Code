@@ -35,11 +35,11 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.xlim(0.2, 1.0)
     plt.ylim(200, 500)
 
-    # 设置主刻度：每 50K
+    # Set main scale: every 50K
     plt.gca().yaxis.set_major_locator(MultipleLocator(50))
-    # 设置次刻度：每 25K（即在主刻度之间再加一个）
+    # Setting of secondary scales: every 25K (i.e., one more between primary scales)
     plt.gca().yaxis.set_minor_locator(MultipleLocator(25))
-    # 开启次刻度显示
+    # Turn on the subscale display
     plt.tick_params(axis='y', which='minor', length=4, color='gray')
     plt.tick_params(axis='y', which='major', length=7)
 
