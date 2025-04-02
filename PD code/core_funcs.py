@@ -27,7 +27,7 @@ def partial_area_of_cell_in_circle(x_cell_center, z_cell_center, dx, dz,
                 count_in += 1
     return (count_in / (sub * sub)) * dx * dz  # Fractional area within the circle
 
-# Construct the area overlap matrix between every point and its neighbors within the horizon
+#   Construct the area overlap matrix between every point and its neighbors within the horizon
 def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
     N = len(x_flat)
     area_mat = np.zeros((N, N), dtype=float)
@@ -100,6 +100,7 @@ def build_K_matrix(Tarr, compute_thermal_conductivity_matrix, factor_mat,
 
 # Apply mixed boundary conditions (mirror and Dirichlet) to temperature array
 
+
 def apply_mixed_bc(Tarr, z_all, Nr_tot, Nz_tot, ghost_nodes):
     # Bottom ghost layers reflect interior
     ghost_inds_bottom = np.arange(ghost_nodes)
@@ -122,6 +123,7 @@ def apply_mixed_bc(Tarr, z_all, Nr_tot, Nz_tot, ghost_nodes):
     j_local = np.arange(ghost_nodes)
     interior_inds_right = (Nr_tot - 1) - (2 * ghost_nodes - j_local - 1)
     Tarr[:, ghost_inds_right] = Tarr[:, interior_inds_right]
+
 
     # Partial Dirichlet condition on right edge (region 0.3 <= z <= 0.5)
     T_hot = 500.0
