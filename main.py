@@ -95,7 +95,7 @@ Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
 # Simulation loop settings
 # ------------------------
 dt = 10                     # Time step (s)
-total_time = 5 * 3600     # Total simulation time (10 hours)
+total_time = 10 * 3600 + dt     # Total simulation time (10 hours)
 nsteps = int(total_time / dt)
 print_interval = int(10 / dt)  # Print progress every 10 seconds of simulated time
 
@@ -105,10 +105,18 @@ start_time = time.time()
 # ------------------------
 # Time-stepping loop
 # ------------------------
+save_times = [2, 4, 6, 8, 10]  # hours
+save_steps = [int(t * 3600 / dt) for t in save_times]
+T_record = []
+
 for step in range(nsteps):
     T, H = update_temperature(T, H, Kmat)
+
+    if step in save_steps:
+        T_record.append(T.copy())  # 保存该时间点温度
+
     if step % print_interval == 0:
-        print(f"Step={step}, Simulated time={step * dt:.2f}s")
+        print(f"Step={step}, Simulated time={step * (dt-1):.2f}s")
 
 end_time = time.time()
 print(f"Calculation finished, elapsed real time={end_time - start_time:.2f}s")
@@ -116,4 +124,6 @@ print(f"Calculation finished, elapsed real time={end_time - start_time:.2f}s")
 # ------------------------
 # Post-processing: visualization
 # ------------------------
-plot.temperature(Rmat, Zmat, T, total_time, nsteps)
+plot.temperature(Rmat, Zmat, T, total_time, nsteps,dt)
+plot.plot_z_profile(T_record, z_all, r_all, save_times)
+
