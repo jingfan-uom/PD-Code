@@ -103,6 +103,8 @@ def build_K_matrix(Tarr, compute_thermal_conductivity_matrix, factor_mat,
 
 def apply_mixed_bc(Tarr, z_all, Nr_tot, Nz_tot, ghost_nodes):
     # Bottom ghost layers reflect interior
+
+
     ghost_inds_bottom = np.arange(ghost_nodes)
     interior_inds_bottom = 2 * ghost_nodes - ghost_inds_bottom - 1
     Tarr[ghost_inds_bottom[:, None], :] = Tarr[interior_inds_bottom[:, None], :]

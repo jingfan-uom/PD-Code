@@ -58,7 +58,7 @@ dx_z = z_flat[:, None] - z_flat[None, :]
 distance_matrix = np.sqrt(dx_r ** 2 + dx_z ** 2)
 
 # Mask: which points are within the horizon (excluding self)
-horizon_mask = (distance_matrix > 0) & (distance_matrix <= delta + 1e-6)
+horizon_mask = (distance_matrix > -1e-6) & (distance_matrix <= delta + 1e-6)
 true_indices = np.where(horizon_mask)  # Optional: for indexing optimization
 
 # ------------------------
@@ -67,7 +67,7 @@ true_indices = np.where(horizon_mask)  # Optional: for indexing optimization
 shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
 partial_area_matrix = cf.compute_partial_area_matrix(r_flat, z_flat, dr, dz, delta, distance_matrix)
 threshold_distance = np.sqrt(2) * dr
-factor_mat = np.where(distance_matrix <= threshold_distance, 1.125, 1.0)  # Local adjustment factor
+factor_mat = np.where(distance_matrix <= threshold_distance+1e-6, 1.125, 1.0)  # Local adjustment factor
 
 # ------------------------
 # Temperature update function
@@ -95,7 +95,7 @@ Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
 # Simulation loop settings
 # ------------------------
 dt = 10                     # Time step (s)
-total_time = 10 * 3600 + dt     # Total simulation time (10 hours)
+total_time = 5 * 3600 + dt     # Total simulation time (10 hours)
 nsteps = int(total_time / dt)
 print_interval = int(10 / dt)  # Print progress every 10 seconds of simulated time
 
@@ -125,5 +125,5 @@ print(f"Calculation finished, elapsed real time={end_time - start_time:.2f}s")
 # Post-processing: visualization
 # ------------------------
 plot.temperature(Rmat, Zmat, T, total_time, nsteps,dt)
-plot.plot_z_profile(T_record, z_all, r_all, save_times)
+
 
