@@ -14,7 +14,7 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
     plt.xlabel("r (m)")
     plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time-dt:.1f}s ({nsteps} steps)")
+    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.show()
 
 

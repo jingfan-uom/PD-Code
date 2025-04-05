@@ -14,7 +14,7 @@ k_mat = 50.0             # Thermal conductivity (W/m·K)
 rho_mat = 7850.0         # Density (kg/m³)
 Cp_mat = 420.0           # Specific heat capacity (J/kg·K)
 Lr, Lz = 0.8, 0.8        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 40        # Number of cells in r and z directions
+Nr, Nz = 80, 80        # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz    # Cell size in r and z
 if Nz  == 1:
     dz = 0
