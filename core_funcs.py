@@ -37,7 +37,7 @@ def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
 
     for i in range(N):
         if dz == 0:
-            cx, cz = x_flat[i], z_flat  # Center of the circle (i)
+            cx, cz = x_flat[i], z_flat[0]  # Center of the circle (i)
         else:
             cx, cz = x_flat[i], z_flat[i]
         for j in range(N):
@@ -51,7 +51,7 @@ def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
                     area_mat[i, j] = dx * dz  # Entire cell inside circle
             else:
                 if dz == 0:
-                    xj, zj = x_flat[j], z_flat
+                    xj, zj = x_flat[j], z_flat[0]
                 else:
                     xj, zj = x_flat[j], z_flat[j]
                 area_mat[i, j] = partial_area_of_cell_in_circle(
@@ -61,12 +61,16 @@ def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
 # Return thermal conductivity field (assumed constant here)
 def get_thermal_conductivity(Tarr, k_mat, delta):
     pi = np.pi
-    return np.full_like(Tarr, k_mat * 4 / pi / delta / delta, dtype=float)
+
+    return np.full_like(Tarr, k_mat*4/pi / delta/delta, dtype=float)
 
 
 # Build a matrix of pairwise thermal conductivities for each i-j pair within the horizon
 def compute_thermal_conductivity_matrix(Tarr, k_mat, delta, r_flat, true_indices):
-    lambda_flat = get_thermal_conductivity(Tarr.flatten(), k_mat, delta)
+    if Tarr.ndim == 1:
+        lambda_flat = get_thermal_conductivity(Tarr, k_mat, delta)
+    else:
+        lambda_flat = get_thermal_conductivity(Tarr.flatten(), k_mat, delta)
     N = len(r_flat)
     thermal_conductivity_matrix = np.zeros((N, N), dtype=float)
 
@@ -86,29 +90,28 @@ def get_temperature(Harr, rho, Cp):
 # Construct the global conductivity matrix K for nonlocal heat transfer
 def build_K_matrix(Tarr, compute_thermal_conductivity_matrix, factor_mat,
                    partial_area_matrix, shape_factor_matrix,
-                   distance_matrix, horizon_mask, true_indices, r_flat, k_mat, delta):
+                   distance_matrix, horizon_mask, true_indices, r_flat, k_mat, delta,dt):
     N = len(r_flat)
     cond_mat = compute_thermal_conductivity_matrix(Tarr, k_mat, delta, r_flat, true_indices)
     K1 = np.zeros((N, N))
 
     # Off-diagonal terms (i ≠ j)
-    valid_offdiag = horizon_mask & (~np.eye(N, dtype=bool))
-    K1[valid_offdiag] = (
-        factor_mat[valid_offdiag] *
-        partial_area_matrix[valid_offdiag] *
-        shape_factor_matrix[valid_offdiag] *
-        cond_mat[valid_offdiag] /
-        (distance_matrix[valid_offdiag] ** 2)
+    K1[horizon_mask] = (
+        factor_mat[horizon_mask] *
+        partial_area_matrix[horizon_mask] *
+        shape_factor_matrix[horizon_mask] *
+        cond_mat[horizon_mask] /
+        (distance_matrix[horizon_mask] ** 2)*dt
     )
 
     # Diagonal terms to ensure row sums to zero
-    valid_diag = horizon_mask & (~np.eye(N, dtype=bool))
+
     DiagTerm = np.zeros((N, N))
-    DiagTerm[valid_diag] = factor_mat[valid_diag] * (
-        partial_area_matrix[valid_diag] *
-        shape_factor_matrix[valid_diag] *
-        cond_mat[valid_diag] * (-1.0) /
-        (distance_matrix[valid_diag] ** 2)
+    DiagTerm[horizon_mask] = factor_mat[horizon_mask] * (
+        partial_area_matrix[horizon_mask] *
+        shape_factor_matrix[horizon_mask] *
+        cond_mat[horizon_mask] * (-1.0) /
+        (distance_matrix[horizon_mask] ** 2)*dt
     )
     row_sum = DiagTerm.sum(axis=1)
     np.fill_diagonal(K1, row_sum)
