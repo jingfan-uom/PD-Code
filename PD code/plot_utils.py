@@ -14,7 +14,7 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
     plt.xlabel("r (m)")
     plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time-dt:.1f}s ({nsteps} steps)")
+    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.show()
 
 
@@ -48,3 +48,45 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.tight_layout()
     plt.show()
 
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+
+def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
+    """
+    绘制一维温度分布曲线
+
+    参数说明:
+    ----------
+    r_all : 1D array
+        所有网格中心的 r 方向坐标（包含幽单元）
+    T : 1D or 2D array
+        温度分布数组。如果是 2D，需要提取 Nz=1 的那一行
+    time_seconds : float
+        当前的模拟时间（秒），用于图标题和文件命名
+    save_dir : str, optional
+        如果指定，将图像保存到该目录
+    """
+    T = T.flatten()
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(r_all, T, 'r-', linewidth=2)
+    plt.xlabel("r (m)")
+    plt.ylabel("Temperature (K)")
+
+    plt.xlim(0.05, 1.45)
+    plt.ylim(300, 500)
+    plt.title(f"1D Temperature Distribution at t = {time_seconds/3600:.2f} h")
+    plt.grid(True)
+    plt.tight_layout()
+
+    # 保存或显示
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        fname = f"T_1D_{int(time_seconds)}s.png"
+        plt.savefig(os.path.join(save_dir, fname))
+        print(f"[plot] Saved 1D temperature plot to {os.path.join(save_dir, fname)}")
+    else:
+        plt.show()
+
+    plt.close()
