@@ -7,6 +7,7 @@ import time
 import core_funcs as cf
 import plot_utils as plot
 import bc_funcs
+import area_matrix_calculator
 # ------------------------
 #  Physical and simulation parameters
 # ------------------------
@@ -27,7 +28,7 @@ ghost_nodes_z = 3  # z方向需要的幽单元层数          # Number of ghost 
 # Construct grid coordinates (including ghost layers)
 # ------------------------
 r_start = 0.2  # Start position in r-direction
-
+tolerance = 1e-8
 # ==========================
 #   x (或 r) 方向
 # ==========================
@@ -73,17 +74,18 @@ else:
     distance_matrix = np.sqrt(dx_r ** 2 + dx_z ** 2)
 
 # Mask: which points are within the horizon (excluding self)
-horizon_mask = (distance_matrix > 1e-8) & (distance_matrix <= delta + 1e-8)
-true_indices = np.where(horizon_mask)
 
+
+partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(r_flat, z_flat, dr, dz, delta, distance_matrix,tolerance)
+horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
+true_indices = np.where(horizon_mask)
 
 # ------------------------
 # Preprocessing: shape factors, area weights, correction factors
 # ------------------------
 shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
-partial_area_matrix = cf.compute_partial_area_matrix(r_flat, z_flat, dr, dz, delta, distance_matrix)
 threshold_distance = np.sqrt(2) * dr
-factor_mat = np.where(distance_matrix <= threshold_distance + 1e-6, 1.5, 1.0)  # Local adjustment factor
+factor_mat = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
 
 # ------------------------
 # Temperature update function
@@ -93,11 +95,11 @@ def update_temperature(Tcurr, Hcurr):
 
     flux = Kmat @ Tcurr.flatten()               # Apply nonlocal heat flux
     flux = flux.reshape(Nz_tot, Nr_tot)              # Reshape back to 2D
-    flux[(flux > -1e-4) & (flux < 1e-4)] = 0
+    flux[(flux > -tolerance) & (flux < tolerance)] = 0
 
     Hnew = Hcurr + flux                              # Update enthalpy
     Tnew = cf.get_temperature(Hnew, rho_mat, Cp_mat) # Convert to temperature
-
+    """
     Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_right, interior_inds_right,
                                            T_bc=500.0, axis=1, )
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left,
@@ -105,14 +107,13 @@ def update_temperature(Tcurr, Hcurr):
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_top, interior_inds_top, axis=0)
     Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_bottom, interior_inds_bottom,T_bc=500.0, axis=0)
 
-
     """
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_top, interior_inds_top, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_bottom, interior_inds_bottom, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
     Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_right, interior_inds_right,
-                                           T_bc=500.0, axis=1, z_mask=z_mask)"""
+                                           T_bc=500.0, axis=1, z_mask=z_mask)
 
     return Tnew, Hnew
 
@@ -122,7 +123,7 @@ def update_temperature(Tcurr, Hcurr):
 T = np.full(Rmat.shape, 200)  # Initial temperature field (uniform 200 K)
 # 在这里调用 bc_funcs 文件中的函数,对边界条件进行初始化
 # ------------------------------------
-"""
+
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_bottom, interior_inds_bottom = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_left, interior_inds_left = bc_funcs.get_left_ghost_indices(r_all, ghost_nodes_x)
@@ -132,7 +133,7 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_top, interior_inds_top, axis=0)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis=0)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_right, interior_inds_right, axis=1)
-z_mask = (z_all >= 0.30 - 1e-8) & (z_all <= 0.50 + 1e-8)
+z_mask = (z_all >= 0.30 - 1e-8) & (z_all <= 0.50 + tolerance)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right, interior_inds_right,
                                            T_bc=500.0, axis=1, z_mask=z_mask)
 """
@@ -147,10 +148,8 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left,
                                             axis=1,)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_top, interior_inds_top, axis=0)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_bottom, interior_inds_bottom,T_bc=500.0, axis=0)
-
+"""
 H = cf.get_enthalpy(T, rho_mat, Cp_mat)  # Initial enthalpy
-
-
 # ------------------------
 # Simulation loop settings
 # ------------------------
@@ -161,7 +160,7 @@ Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
                          distance_matrix, horizon_mask, true_indices, r_flat,
                          k_mat, delta,dt)  # Initial stiffness matrix
 
-total_time = 1 * 3600     # Total simulation time (10 hours)
+total_time = 5 * 3600     # Total simulation time (10 hours)
 nsteps = int(total_time / dt)
 print_interval = int(10 / dt)  # Print progress every 10 seconds of simulated time
 print(f"Total steps: {nsteps}")

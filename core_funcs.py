@@ -9,54 +9,6 @@ def compute_shape_factor_matrix(Rmat, true_indices):
         shape_factor_matrix[i, j] = (2 * r_flat[j]) / (r_flat[i] + r_flat[j])
     return shape_factor_matrix
 
-# Estimate the overlapping area between a rectangular cell and a circular horizon using sub-grid sampling
-def partial_area_of_cell_in_circle(x_cell_center, z_cell_center, dx, dz,
-                                   x_circle_center, z_circle_center, delta):
-    sub = 10  # Subdivisions per dimension (total sub*sub sampling points)
-    step_x = dx / sub
-    step_z = dz / sub
-    x0 = x_cell_center - 0.5 * dx  # Bottom-left x corner of cell
-    z0 = z_cell_center - 0.5 * dz  # Bottom-left z corner of cell
-    count_in = 0  # Count how many sample points are inside the circle
-    for ix in range(sub):
-        for iz in range(sub):
-            x_samp = x0 + (ix + 0.5) * step_x
-            z_samp = z0 + (iz + 0.5) * step_z
-            dist2 = (x_samp - x_circle_center) ** 2 + (z_samp - z_circle_center) ** 2
-            if dist2 <= delta ** 2 + 1e-6:
-                count_in += 1
-    if dz == 0:
-        return (count_in / (sub * sub)) * dx   # Fractional area within the circle
-    else:
-        return (count_in / (sub * sub)) * dx * dz
-
-#   Construct the area overlap matrix between every point and its neighbors within the horizon
-def compute_partial_area_matrix(x_flat, z_flat, dx, dz, delta, distance_matrix):
-    N = len(x_flat)
-    area_mat = np.zeros(distance_matrix.shape, dtype=float)
-
-    for i in range(N):
-        if dz == 0:
-            cx, cz = x_flat[i], z_flat[0]  # Center of the circle (i)
-        else:
-            cx, cz = x_flat[i], z_flat[i]
-        for j in range(N):
-            dist = distance_matrix[i, j]
-            if dist > delta + 1e-6:
-                area_mat[i, j] = 0.0  # Definitely outside
-            elif dist <= (delta - 0.25*dx):
-                if dz == 0:
-                    area_mat[i, j] = dx
-                else:
-                    area_mat[i, j] = dx * dz  # Entire cell inside circle
-            else:
-                if dz == 0:
-                    xj, zj = x_flat[j], z_flat[0]
-                else:
-                    xj, zj = x_flat[j], z_flat[j]
-                area_mat[i, j] = partial_area_of_cell_in_circle(
-                        xj, zj, dx, dz, cx, cz, delta)
-    return area_mat
 
 # Return thermal conductivity field (assumed constant here)
 def get_thermal_conductivity(Tarr, k_mat, delta):
