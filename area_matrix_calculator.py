@@ -1,13 +1,12 @@
 import numpy as np
 
-
 def get_cell_corners(x_center, z_center, dx, dz):
     """
-    给定单元中心 (x_center, z_center) 与网格尺寸 (dx, dz),
-    返回该单元的角点(2D)或端点(1D)的坐标列表 corners。
+    Given the cell center (x_center, z_center) and cell dimensions (dx, dz),
+    return the coordinates of the corners (2D) or endpoints (1D).
     """
     if dz == 0:
-        # 1D 情况，只有左右两个点
+        # 1D case: only left and right endpoints
         x_left = x_center - 0.5 * dx
         x_right = x_center + 0.5 * dx
         corners = [
@@ -15,7 +14,7 @@ def get_cell_corners(x_center, z_center, dx, dz):
             (x_right, z_center),
         ]
     else:
-        # 2D 情况, 上下左右四个角点
+        # 2D case: four corners of the rectangle
         x_left = x_center - 0.5 * dx
         x_right = x_center + 0.5 * dx
         z_down = z_center - 0.5 * dz
@@ -29,18 +28,20 @@ def get_cell_corners(x_center, z_center, dx, dz):
     return corners
 
 
-def is_all_in_out(corners, cx, cz, delta,tolerance):
+def is_all_in_out(corners, cx, cz, delta, tolerance):
     """
-    判断 corners 里的所有角点相对于圆心 (cx, cz) 半径 delta 的位置。
-    返回:
-      "all_in"   -> 角点都在圆内
-      "all_out"  -> 角点都在圆外
-      "partial"  -> 部分在内, 部分在外
+    Determine the spatial relationship between the given corners and a circle
+    centered at (cx, cz) with radius delta.
+
+    Returns:
+        - "all_in"   -> all corners are inside the circle
+        - "all_out"  -> all corners are outside the circle
+        - "partial"  -> some corners are inside and some are outside
     """
     in_flags = []
     for (x_pt, z_pt) in corners:
         dist2 = (x_pt - cx) ** 2 + (z_pt - cz) ** 2
-        in_flags.append(dist2 <= delta ** 2 + tolerance )
+        in_flags.append(dist2 <= delta ** 2 + tolerance)
 
     if all(in_flags):
         return "all_in"
@@ -57,14 +58,17 @@ def partial_area_of_cell_in_circle(
         delta,
         tolerance):
     """
-    对"部分交叠"的网格单元, 用子网格采样方式估计交叠面积。
-    - dz=0 => 1D 线段采样
-    - dz!=0 => 2D 网格采样
-    sub: 每维采样细分次数
+    Estimate the overlapped area between a grid cell and a circle (partial intersection),
+    using subgrid sampling.
+
+    Parameters:
+        - dz = 0 => 1D segment sampling
+        - dz ≠ 0 => 2D cell sampling
+        - sub: number of subdivisions in each direction
     """
     sub = 10
     if dz == 0:
-        # 1D 线段
+        # 1D segment
         x_left = x_center - 0.5 * dx
         step_x = dx / sub
         count_in = 0
@@ -77,7 +81,7 @@ def partial_area_of_cell_in_circle(
         return dx * frac
 
     else:
-        # 2D 情况
+        # 2D cell
         x_left = x_center - 0.5 * dx
         z_down = z_center - 0.5 * dz
         step_x = dx / sub
@@ -102,56 +106,51 @@ def compute_partial_area_matrix(
         x_flat, z_flat,
         dx, dz,
         delta,
-        distance_matrix,tolerance
+        distance_matrix,
+        tolerance
 ):
     """
-    根据"四角点"判断每个网格单元 与 圆心 (cx,cz) 半径 delta 的交叠面积。
-    distance_matrix[i,j] 表示第 i 个圆心 与 第 j 个单元中心 的中心距离(仅供快速剔除).
+    Compute the area overlap matrix between all nodes and their neighbors
+    based on corner geometry and partial area sampling.
 
-    对于每个 (i, j):
-      1) 若 dist>delta + 1e-6 => 完全在外
-      2) 否则:
-         - 用 get_cell_corners() 得到 j 单元的角点
-         - 用 is_all_in_out() 判断 "all_in/all_out/partial"
-         - 若 all_in => dx*dz (或 dx, 1D)
-         - 若 all_out => 0
-         - 若 partial => partial_area_of_cell_in_circle_sampling()
+    For each (i, j):
+      1) If distance > delta + diagonal/2 + tolerance => definitely outside
+      2) Otherwise:
+         - Use get_cell_corners() to get the four corners of cell j
+         - Use is_all_in_out() to classify the corner status
+         - If all_in   => full cell area (dx * dz or dx in 1D)
+         - If all_out  => 0
+         - If partial  => compute area using partial_area_of_cell_in_circle()
     """
     N = len(x_flat)
     area_mat = np.zeros((N, N), dtype=float)
 
     for i in range(N):
         cx = x_flat[i]
-        if dz == 0:
-            cz = z_flat[0]  # 1D: z不变
-        else:
-            cz = z_flat[i]
+        cz = z_flat[0] if dz == 0 else z_flat[i]
 
         for j in range(N):
             dist = distance_matrix[i, j]
-            if dist > delta + 0.5* np.sqrt(dx**2+ dz**2)+ tolerance:
-                # 快速判定在外
+            if dist > delta + 0.5 * np.sqrt(dx**2 + dz**2) + tolerance:
+                # Early exclusion: cell j is too far from point i
                 area_mat[i, j] = 0.0
                 continue
 
-            # j 单元的中心
+            # Get the center of cell j
             xj = x_flat[j]
-            zj = z_flat[j] if dz != 0 else z_flat[0]
+            zj = z_flat[0] if dz == 0 else z_flat[j]
 
-            # 获取 j 单元的角点
+            # Compute corners of cell j
             corners_j = get_cell_corners(xj, zj, dx, dz)
 
-            # 判断这些角点与 (cx, cz) 的关系
-            status = is_all_in_out(corners_j, cx, cz, delta,tolerance)
+            # Check relationship between corners and horizon
+            status = is_all_in_out(corners_j, cx, cz, delta, tolerance)
 
             if status == "all_in":
-                # 全部在 horizon 内
-                area_mat[i, j] = (dx if dz == 0 else dx * dz)
+                area_mat[i, j] = dx if dz == 0 else dx * dz
             elif status == "all_out":
-                # 全部在外
                 area_mat[i, j] = 0.0
             else:
-                # 部分 => 采样估算
                 area_mat[i, j] = partial_area_of_cell_in_circle(
                     xj, zj, dx, dz,
                     cx, cz, delta,
