@@ -8,7 +8,7 @@ import core_funcs as cf
 import plot_utils as plot
 import bc_funcs
 import area_matrix_calculator
-
+import grid_generator
 # ------------------------
 # Set material properties arrays (match shape of Rmat)
 # ------------------------
@@ -18,96 +18,122 @@ Ts = 273.1
 Tl = 273.2
 L = 333
 
-Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 10, 10          # Number of cells in r and z directions
-dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
+Lr, Lz = 0.4, 0.4        # Domain size in r and z directions (meters)
+r_start, z_start = 0.0, 0.0  # Starting positions in r and z
 
-if Nz == 1:
-    dz = 0  # Treat as 1D if z direction is disabled
-
-delta = 3 * dr          # Horizon radius for nonlocal interaction
-ghost_nodes_x = 3        # Number of ghost cells in the x (or r) direction
-ghost_nodes_z = 3        # Number of ghost cells in the z direction
-
-# ------------------------
-# Construct grid coordinates (including ghost layers)
-# ------------------------
-r_start = 0.0  # Starting position in r-direction
-tolerance = 1e-8
+# Coarse and fine grid spacing
+dr_coarse, dz_coarse = 0.04, 0.04
+dr_fine, dz_fine = 0.01, 0.01
+tolerance= 1e-8
+# Define fine region (set to None or empty if no fine region)
+def fine_mask_func(r, z):
+    return (z >= 0.15) and (r >= 0.1)
+fine_mask_func = fine_mask_func
+delta_fine = 3 * dr_fine
+delta_coarse = 3 * dr_coarse
+# Ghost node number
+ghost_nodes_r, ghost_nodes_z = 3, 3
 
 # ==========================
 #   r (or x) direction
 # ==========================
-r_phys = np.linspace(r_start , r_start + Lr , Nr)
-#r_ghost_left = np.linspace(r_start - ghost_nodes_x * dr + dr/2, r_start - dr/2, ghost_nodes_x)
-r_ghost_right = np.linspace(
-    r_start + Lr + dr/2,
-    r_start + Lr + dr/2 + (ghost_nodes_x - 1) * dr,
-    ghost_nodes_x
-)
-r_all = np.concatenate([ r_phys, r_ghost_right])
-Nr_tot = len(r_all)
+grid_info = grid_generator.generate_fine_and_coarse_grids(r_start, z_start,Lr, Lz,dr_coarse, dz_coarse,dr_fine, dz_fine,fine_mask_func, delta=3)
 
-# ==========================
-#   z direction
-# ==========================
-z_phys = np.linspace(Lz - dz/2, dz/2, Nz)
-z_ghost_top = np.linspace(Lz + (ghost_nodes_z - 1) * dz + dz/2, Lz + dz/2, ghost_nodes_z)
-z_ghost_bot = np.linspace(0 - dz/2, -ghost_nodes_z * dz + dz/2, ghost_nodes_z)
-z_all = np.concatenate([z_ghost_top, z_phys, z_ghost_bot])
-Nz_tot = len(z_all)
+fine_mask_phys = grid_info["fine_mask_phys"]
+fine_mask_interface_boundary = grid_info["fine_mask_intf_boundary"]
 
-# Meshgrid
-if len(z_all) == 1:
-    Rmat = r_all
-    Zmat = z_all
-else:
-    Rmat, Zmat = np.meshgrid(r_all, z_all, indexing='xy')
+coarse_mask_phys = grid_info["coarse_mask_phys"]
+coarse_mask_interface_boundary = grid_info["coarse_mask_intf_boundary"]
+
+# 坐标矩阵
+fine_phys_coords = grid_info["fine_phys_coords"]
+fine_intf_coords = grid_info["fine_intf_coords"]
+
+coarse_phys_coords = grid_info["coarse_phys_coords"]
+coarse_intf_coords = grid_info["coarse_intf_coords"]
+
 
 # ------------------------
 # Define material region (0=water, 1=ice)
 # ------------------------
-material_id = np.zeros_like(Rmat, dtype=int)
+TEMP_ICE  = 268.15   # 细网格物理域（冰）
+TEMP_WATER = 373.15  # 粗网格物理域（热水）
 
-# 冰块位置：中心圆柱半径=0.04，高度=0.04（位于水底中心）
-ice_radius = 0.04
-ice_height = 0.04
+# 各自温度向量
+temp_fine_phys   = np.full(fine_phys_coords.shape[0],   TEMP_ICE)
+temp_coarse_phys = np.full(coarse_phys_coords.shape[0], TEMP_WATER)
 
-ice_mask = (Rmat <= ice_radius) & (Zmat <= ice_height)
-material_id[ice_mask] = 1  # 冰区域设为 1
-T = np.where(material_id == 1, 268.15, 373.15)  # 冰为 268.15K，水为 373.15K
+# === 2) 计算 “粗网格接口点” 的温度 ======================================
+# 依赖前面写好的 4 点均值插值函数：
+# interpolate_coarse_interface_temperature(...)
+coarse_intf_temps = grid_generator.interpolate_coarse_interface_temperature(
+    coarse_intf_coords,      # 红点（粗接口点）
+    fine_phys_coords,        # 绿点（细物理域）
+    temp_fine_phys,          # 细物理域温度
+    dr_fine,
+    dz_fine
+)
 
-
+# === 3) 计算 “细网格接口点” 的温度 ======================================
+# 依赖前面写好的 IDW 插值函数：
+# interpolate_fine_interface_temperature_idw(...)
+fine_intf_temps = grid_generator.interpolate_fine_interface_temperature(
+    fine_intf_coords,        # 细接口点
+    coarse_phys_coords,      # 粗物理域坐标
+    temp_coarse_phys,        # 粗物理域温度
+    dr_coarse,
+    dz_coarse,
+    power=1.0                # IDW 权重指数；1=线性衰减，2=平方反比
+)
 # ------------------------
 # Compute distance matrix and horizon mask
 # ------------------------
-r_flat = Rmat.flatten()
-z_flat = Zmat.flatten()
 
-if Nz_tot == 1:
-    # 1D: only consider radial distances
-    dx_r = r_flat[:, None] - r_flat[None, :]
-    distance_matrix = np.abs(dx_r)
-else:
-    # 2D: use Euclidean distance
-    dx_r = r_flat[:, None] - r_flat[None, :]
-    dx_z = z_flat[:, None] - z_flat[None, :]
-    distance_matrix = np.sqrt(dx_r ** 2 + dx_z ** 2)
+# 组合坐标
+fine_all_coords = np.vstack((fine_phys_coords, fine_intf_coords))  # shape = (N1 + N2, 2)
+coarse_all_coords = np.vstack((coarse_phys_coords, coarse_intf_coords))  # shape = (N1 + N2, 2)
+
+
+# 拆分为 r 和 z 分量
+r_fine = fine_all_coords[:, 0]
+z_fine = fine_all_coords[:, 1]
+r_coarse = fine_all_coords[:, 0]
+z_coarse = fine_all_coords[:, 1]
+# 构造距离矩阵（欧氏距离）
+dx_r_fine = r_fine[:, None] - r_fine[None, :]
+dx_z_fine = z_fine[:, None] - z_fine[None, :]
+dx_r_coarse= r_coarse[:, None] - r_coarse[None, :]
+dx_z_coarse= z_coarse[:, None] - z_coarse[None, :]
+
+fine_distance_matrix = np.sqrt(dx_r_fine**2 + dx_z_fine**2)  # shape = (N1 + N2, N1 + N2)
+coarse_distance_matrix = np.sqrt(dx_r_coarse**2 + dx_z_coarse**2)  # shape = (N1 + N2, N1 + N2)
+
 
 # Compute partial area overlap matrix
-partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
-    r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance
+fine_partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
+    r_fine, z_fine, dr_fine, dz_fine, delta_fine, fine_distance_matrix, tolerance
 )
-horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
-true_indices = np.where(horizon_mask)
+coarse_partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
+    r_coarse, z_coarse, dr_coarse, dz_coarse, delta_coarse, coarse_distance_matrix, tolerance
+)
+
+fine_horizon_mask = (fine_distance_matrix > tolerance) & (fine_partial_area_matrix != 0.0)
+coarse_horizon_mask = (coarse_distance_matrix > tolerance) & (coarse_partial_area_matrix != 0.0)
+
+fine_true_indices = np.where(fine_horizon_mask)
+coarse_true_indices = np.where(coarse_horizon_mask)
 
 # ------------------------
 # Preprocessing: shape factors, area weights, correction factors
 # ------------------------
-shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
-threshold_distance = np.sqrt(2) * dr
-factor_mat = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
+fine_tshape_factor_matrix = cf.compute_shape_factor_matrix(r_fine, fine_true_indices)
+coarse_shape_factor_matrix = cf.compute_shape_factor_matrix(r_coarse, coarse_true_indices)
 
+fine_threshold_distance = np.sqrt(2) * dr_fine
+coarse_threshold_distance = np.sqrt(2) * dr_coarse
+
+fine_factor_mat = np.where(fine_distance_matrix <= fine_threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
+coarse_factor_mat = np.where(coarse_distance_matrix <= coarse_threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
 # ------------------------
 # Temperature update function
 # ------------------------
