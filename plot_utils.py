@@ -7,11 +7,28 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     T_max = np.max(T)
 
     plt.figure(figsize=(6, 5))
-    levels = np.arange(270, 380, 5)  # 到 380，右边闭区间建议设成 385
+    levels = np.arange(300, 400, 5)  # 到 380，右边闭区间建议设成 385
 
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, .1])
-    plt.ylim([0.0, 0.1])
+    plt.xlim([0.0, 0.4])
+    plt.ylim([0.0, 0.4])
+    cbar = plt.colorbar(ctf)
+    cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
+    plt.xlabel("r (m)")
+    plt.ylabel("z (m)")
+    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
+    plt.show()
+
+def temperature_fine(R_all, Z_all, T, total_time, nsteps,dt):
+    T_min = np.min(T)
+    T_max = np.max(T)
+
+    plt.figure(figsize=(6, 5))
+    levels = np.arange(300, 405, 5)  # 到 380，右边闭区间建议设成 385
+
+    ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
+    plt.xlim([0.4, 0.6])
+    plt.ylim([0.0, 0.4])
     cbar = plt.colorbar(ctf)
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
     plt.xlabel("r (m)")
@@ -45,7 +62,7 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.ylabel("Temperature at z = 0.4 m (K)")
     plt.title("z = 0.4 m Cross-sectional Temperature Evolution")
     plt.xlim(0.2, 1.0)
-    plt.ylim(200, 500)
+    plt.ylim(200, 400)
 
     plt.gca().yaxis.set_major_locator(MultipleLocator(50))
     plt.gca().yaxis.set_minor_locator(MultipleLocator(25))
@@ -95,3 +112,62 @@ def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
 
     plt.close()
 
+
+def plot_combined_temperature_contour(
+        Rmat_fine: np.ndarray,
+        Zmat_fine: np.ndarray,
+        T_fine: np.ndarray,
+        Rmat_coarse: np.ndarray,
+        Zmat_coarse: np.ndarray,
+        T_coarse: np.ndarray,
+        nsteps: int,
+        total_time: float,
+        levels=np.arange(270, 385, 5)
+):
+    """
+    将 fine 和 coarse 网格的温度合并后插值为规则网格，并绘制等高填色图。
+
+    参数：
+    - Rmat_fine, Zmat_fine: 细网格的坐标矩阵
+    - T_fine: 细网格温度矩阵
+    - Rmat_coarse, Zmat_coarse: 粗网格的坐标矩阵
+    - T_coarse: 粗网格温度矩阵
+    - nsteps: 当前模拟的步数
+    - total_time: 当前模拟的累计时间（单位：秒）
+    - levels: 等高线温度层级
+    """
+
+    # 合并所有坐标和温度为一维
+    R_all = np.concatenate([Rmat_fine.flatten(), Rmat_coarse.flatten()])
+    Z_all = np.concatenate([Zmat_fine.flatten(), Zmat_coarse.flatten()])
+    T_all = np.concatenate([T_fine.flatten(), T_coarse.flatten()])
+
+    # 创建规则网格以便插值
+    r_lin = np.linspace(np.min(R_all), np.max(R_all), 300)
+    z_lin = np.linspace(np.min(Z_all), np.max(Z_all), 300)
+    R_grid, Z_grid = np.meshgrid(r_lin, z_lin)
+
+    # 插值到规则网格
+    T_grid = griddata(
+        points=np.stack((R_all, Z_all), axis=-1),
+        values=T_all,
+        xi=(R_grid, Z_grid),
+        method='linear'
+    )
+
+    # 提取有效温度范围（排除插值空洞）
+    T_min = np.nanmin(T_grid)
+    T_max = np.nanmax(T_grid)
+
+    # 绘图
+    plt.figure(figsize=(6, 5))
+    ctf = plt.contourf(R_grid, Z_grid, T_grid, levels=levels, cmap='jet')
+    plt.xlim([np.min(R_all), np.max(R_all)])
+    plt.ylim([np.min(Z_all), np.max(Z_all)])
+    cbar = plt.colorbar(ctf)
+    cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
+    plt.xlabel("r (m)")
+    plt.ylabel("z (m)")
+    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
+    plt.tight_layout()
+    plt.show()
