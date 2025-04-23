@@ -6,6 +6,7 @@ tol= 1e-8
 def robust_key(r, z):
     return (round(r / tol * tol), round(z / tol * tol))
 
+
 def get_coarse_neighbor_points(
         Rmat_coarse: np.ndarray,
         Zmat_coarse: np.ndarray,
@@ -18,30 +19,22 @@ def get_coarse_neighbor_points(
         tol: float = 1e-10,
 ):
     """
-    Generate neighbor points for ghost nodes and build coord2index map from fine grid.
+    For each ghost point on the coarse grid, map it to the 4 surrounding fine grid points.
 
     Returns:
-        neighbor_points: ndarray of shape (N_ghost, 4, 2)
-        coord2index: dict {robust_key(r, z): (i_z, i_r)} based on r_all_fine/z_all_fine
+        coarse2fine_indices: dict {(i_z_coarse, i_r_coarse): [(i_z_fine, i_r_fine), ...]}
     """
     Nz, Nr = Rmat_coarse.shape
     N_per_line = Nz - 6 if axis == 1 else Nr - 6
-    N_ghost = len(ghost_indices) * N_per_line
+    coarse2fine_indices = {}
 
-    neighbor_points = np.empty((N_ghost, 4, 2))
-    coord2index = {}
-
-    index = 0
     for idx in ghost_indices:
         for i in range(N_per_line):
-            if axis == 1:
-                r = Rmat_coarse[i + 3, idx]
-                z = Zmat_coarse[i + 3, idx]
-            else:
-                r = Rmat_coarse[idx, i + 3]
-                z = Zmat_coarse[idx, i + 3]
+            i_z_coarse, i_r_coarse = (i + 3, idx) if axis == 1 else (idx, i + 3)
+            r = Rmat_coarse[i_z_coarse, i_r_coarse]
+            z = Zmat_coarse[i_z_coarse, i_r_coarse]
 
-            # 定义四个邻接点
+            # 四个相邻细网格点的坐标
             neighbors = [
                 (r - dr_fine / 2, z - dz_fine / 2),
                 (r - dr_fine / 2, z + dz_fine / 2),
@@ -49,58 +42,50 @@ def get_coarse_neighbor_points(
                 (r + dr_fine / 2, z + dz_fine / 2),
             ]
 
-            neighbor_points[index] = neighbors
-
-            # 为这4个点创建坐标索引（在细网格上）
+            fine_indices = []
             for r_n, z_n in neighbors:
-                key = robust_key(r_n, z_n)
-                # 只添加一次
-                if key not in coord2index:
-                    # 找对应的 r, z 索引（在一维坐标向量中）
-                    try:
-                        i_r = np.where(np.abs(r_all_fine - r_n) < tol)[0][0]
-                        i_z = np.where(np.abs(z_all_fine - z_n) < tol)[0][0]
-                        coord2index[key] = (i_z, i_r)
-                    except IndexError:
-                        raise ValueError(f"Point ({r_n:.6f}, {z_n:.6f}) not found in fine grid.")
+                try:
+                    i_r_fine = np.where(np.abs(r_all_fine - r_n) < tol)[0][0]
+                    i_z_fine = np.where(np.abs(z_all_fine - z_n) < tol)[0][0]
+                    fine_indices.append((i_z_fine, i_r_fine))
+                except IndexError:
+                    raise ValueError(f"Point ({r_n:.6f}, {z_n:.6f}) not found in fine grid.")
 
-            index += 1
+            coarse2fine_indices[(i_z_coarse, i_r_coarse)] = fine_indices
+            print("Sample mapping from coarse points to fine neighbors:\n")
+            for i, (coarse_idx, fine_list) in enumerate(coarse2fine_indices.items()):
+                print(f"Coarse point {coarse_idx} maps to fine points: {fine_list}")
+                if i >= 4:  # 只打印前5个
+                    break
 
-    return neighbor_points, coord2index
+    return coarse2fine_indices
 
 
 def interpolate_temperature_for_coarse(
-        T_coarse: np.ndarray,
-        neighbor_points: np.ndarray,
-        T_fine: np.ndarray,
-        coord2index: dict,
-        ghost_indices: np.ndarray,
-        axis,
-        ):
-
+    T_coarse: np.ndarray,
+    T_fine: np.ndarray,
+    coarse2fine_indices: dict,
+    ghost_indices: np.ndarray,
+    axis
+):
     Nz_coarse, Nr_coarse = T_coarse.shape
-    N_per_line = Nz_coarse-6 if axis == 1 else Nr_coarse-6
+    N_per_line = Nz_coarse - 6 if axis == 1 else Nr_coarse - 6
 
-    index = 0
     for idx in ghost_indices:
         for i in range(N_per_line):
-            temps = []
-            for r, z in neighbor_points[index]:
-                key = robust_key(r, z)
-                if key in coord2index:
-                    idx_z, idx_r = coord2index[key]
-                    temps.append(T_fine[idx_z, idx_r])
-                else:
-                    raise ValueError(f"Coordinate {key} not found in fine grid.")
-            if axis == 1:
-                row, col = i+3, idx
-            else:
-                row, col = idx, i+3
+            row, col = (i + 3, idx) if axis == 1 else (idx, i + 3)
+            coarse_key = (row, col)
+
+            if coarse_key not in coarse2fine_indices:
+                raise ValueError(f"Coarse point {coarse_key} not found in coarse2fine_indices.")
+
+            fine_indices = coarse2fine_indices[coarse_key]
+            temps = [T_fine[i_z, i_r] for i_z, i_r in fine_indices]
 
             T_coarse[row, col] = np.mean(temps)
-            index += 1
 
     return T_coarse
+
 
 
 def get_fine_neighbor_points(
@@ -114,102 +99,85 @@ def get_fine_neighbor_points(
     r_all_coarse: np.ndarray,
     z_all_coarse: np.ndarray,
     axis,
+    tol=1e-8
 ):
     Nz, Nr = Rmat_fine.shape
     N_per_line = Nz - 6 if axis == 1 else Nr - 6
-    N_target = len(target_indices) * N_per_line
-
-    neighbor_points = np.empty((N_target, 3, 2))
-    coord2index = {}
+    fine2coarse_indices = {}
 
     R_flat = Rmat_coarse.reshape(-1)
     Z_flat = Zmat_coarse.reshape(-1)
     coords_flat = np.stack([R_flat, Z_flat], axis=-1)
 
-    index = 0
     radius = np.sqrt(10) / 2 * dr_fine + 1e-8
 
     for idx in target_indices:
         for i in range(N_per_line):
-            if axis == 1:
-                r = Rmat_fine[i + 3, idx]
-                z = Zmat_fine[i + 3, idx]
-            else:
-                r = Rmat_fine[idx, i + 3]
-                z = Zmat_fine[idx, i + 3]
+            i_z_fine, i_r_fine = (i + 3, idx) if axis == 1 else (idx, i + 3)
 
-            dists = np.sqrt((coords_flat[:, 0] - r) ** 2 + (coords_flat[:, 1] - z) ** 2)
+            r_fine = Rmat_fine[i_z_fine, i_r_fine]
+            z_fine = Zmat_fine[i_z_fine, i_r_fine]
+
+            # 寻找 coarse 点
+            dists = np.sqrt((coords_flat[:, 0] - r_fine)**2 + (coords_flat[:, 1] - z_fine)**2)
             nearby_mask = (dists <= radius)
             nearby_coords = coords_flat[nearby_mask]
 
-            if len(nearby_coords) < 3 :
-                raise ValueError(f"Not enough coarse neighbors found for fine point ({r}, {z})")
-            if len(nearby_coords) > 3 :
-                raise ValueError(f"Too much coarse neighbors found for fine point ({r}, {z})")
+            if len(nearby_coords) != 3:
+                raise ValueError(f"Expected exactly 3 coarse neighbors for fine point ({r_fine}, {z_fine}), found {len(nearby_coords)}.")
 
-            neighbor_points[index] = nearby_coords
+            coarse_indices_list = []
 
             for r_c, z_c in nearby_coords:
-                key = robust_key(r_c, z_c)
-                if key not in coord2index:
-                    try:
-                        i_r = np.where(np.abs(r_all_coarse - r_c) < tol)[0][0]
-                        i_z = np.where(np.abs(z_all_coarse - z_c) < tol)[0][0]
-                        coord2index[key] = (i_z, i_r)
-                    except IndexError:
-                        raise ValueError(f"Coarse point ({r_c:.6f}, {z_c:.6f}) not found in grid.")
+                try:
+                    i_r_coarse = np.where(np.abs(r_all_coarse - r_c) < tol)[0][0]
+                    i_z_coarse = np.where(np.abs(z_all_coarse - z_c) < tol)[0][0]
+                except IndexError:
+                    raise ValueError(f"Coarse point ({r_c:.6f}, {z_c:.6f}) not found in coarse grid arrays.")
 
-            index += 1
+                coarse_indices_list.append((i_z_coarse, i_r_coarse))
 
-    return neighbor_points, coord2index
+            fine2coarse_indices[(i_z_fine, i_r_fine)] = coarse_indices_list
+    print("Fine to coarse indices (sample):")
+    for fine_idx, coarse_idxs in list(fine2coarse_indices.items())[:3]:
+        print(f"Fine point {fine_idx}: Coarse indices {coarse_idxs}")
+
+
+    return fine2coarse_indices
+
+
 
 def interpolate_temperature_for_fine(
     T_fine: np.ndarray,
-    neighbor_points: np.ndarray,
     T_coarse: np.ndarray,
-    coord2index: dict,
+    fine2coarse_indices: dict,
     ghost_indices: np.ndarray,
-    axis,
+    axis
 ):
-    Nz_fine, Nr_fine = T_fine.shape
-    N_per_line = Nz_fine - 6 if axis == 1 else Nr_fine - 6
     T_result = T_fine.copy()
 
-    index = 0
+    Nz_fine, Nr_fine = T_fine.shape
+    N_per_line = Nz_fine - 6 if axis == 1 else Nr_fine - 6
+
     for idx in ghost_indices:
         for i in range(N_per_line):
             if axis == 1:
-                row, col = i+3, idx
+                row, col = i + 3, idx
             else:
-                row, col = idx, i+3
+                row, col = idx, i + 3
 
-            tri_coords = neighbor_points[index]
-            coords = []
-            values = []
+            fine_key = (row, col)
 
-            for r, z in tri_coords:
-                key = robust_key(r, z)
-                if key not in coord2index:
-                    raise ValueError(f"Neighbor coordinate {key} not found in coord2index.")
-                i_z, i_r = coord2index[key]
-                coords.append([r, z])
-                values.append(T_coarse[i_z, i_r])
+            if fine_key not in fine2coarse_indices:
+                raise ValueError(f"Fine point {fine_key} not found in fine2coarse_indices.")
 
-            coords = np.array(coords)
-            values = np.array(values)
+            coarse_indices = fine2coarse_indices[fine_key]
 
-            r_target = np.mean(coords[:, 0])  # 插值中心点坐标（简化）
-            z_target = np.mean(coords[:, 1])
+            # 根据 coarse indices 提取对应的温度值
+            coarse_temps = [T_coarse[i_z, i_r] for i_z, i_r in coarse_indices]
 
-            A = np.array([
-                [coords[0][0], coords[1][0], coords[2][0]],
-                [coords[0][1], coords[1][1], coords[2][1]],
-                [1.0,         1.0,         1.0        ]
-            ])
-            b = np.array([r_target, z_target, 1.0])
-            lambdas = np.linalg.solve(A, b)
-
-            T_result[row, col] = np.dot(lambdas, values)
-            index += 1
+            # 直接取平均作为 fine 点的温度
+            T_result[row, col] = np.mean(coarse_temps)
 
     return T_result
+

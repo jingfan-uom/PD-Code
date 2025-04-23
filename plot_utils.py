@@ -80,13 +80,13 @@ def temperature_combined(
 
     # --- 1. 计算物理区域边界 ---
     # --- 1. 计算物理区域边界（包含鬼点） ---
-    r_phys_min_fine = np.min(Rmat_fine +r_start_fine - ghost_nodes_r_fine * dr_fine + dr_fine/2)
+    r_phys_min_fine = np.min(Rmat_fine +  ghost_nodes_r_fine * dr_fine )
     r_phys_max_fine = np.max(Rmat_fine)
     z_phys_min_fine = np.min(Zmat_fine)
     z_phys_max_fine = np.max(Zmat_fine)
 
     r_phys_min_coarse = np.min(Rmat_coarse)
-    r_phys_max_coarse = np.max(Rmat_coarse - r_start_coarse + Lr_coarse + dr_coarse/2 + (ghost_nodes_r_coarse - 1) * dr_coarse)
+    r_phys_max_coarse = np.max(Rmat_coarse - ghost_nodes_r_coarse  * dr_coarse)
     z_phys_min_coarse = np.min(Zmat_coarse)
     z_phys_max_coarse = np.max(Zmat_coarse)
 

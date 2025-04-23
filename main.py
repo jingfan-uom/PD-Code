@@ -102,27 +102,26 @@ T_fine = np.full(Rmat_fine.shape, 373.15)  # Initial temperature field (uniform 
 # get_neighbor_points_array_from_matrices(...)
 # 例如右边界
 
-neighbor_points_right_coarse, coord_index_coarse = grid_generator_rectangle.get_coarse_neighbor_points(
+coord_index_coarse = grid_generator_rectangle.get_coarse_neighbor_points(
     Rmat_coarse,
     Zmat_coarse,
     ghost_inds_right_coarse,
     dr_fine,
     dz_fine,
-    r_phys_fine,
-    z_phys_fine,
+    r_all_fine,
+    z_all_fine,
     axis=1,
 )
 
 T_coarse = grid_generator_rectangle.interpolate_temperature_for_coarse(
     T_coarse,
-    neighbor_points_right_coarse,
     T_fine,
     coord_index_coarse,
     ghost_inds_right_coarse,
     axis=1,
 )
 
-neighbor_points_left_fine, coord_index_left_fine = grid_generator_rectangle.get_fine_neighbor_points(
+coord_index_left_fine = grid_generator_rectangle.get_fine_neighbor_points(
     Rmat_fine,
     Zmat_fine,
     ghost_inds_left_fine,
@@ -137,7 +136,6 @@ neighbor_points_left_fine, coord_index_left_fine = grid_generator_rectangle.get_
 # === 第二步：插值得到细网格 ghost 区域的温度 ===
 T_fine = grid_generator_rectangle.interpolate_temperature_for_fine(
     T_fine,
-    neighbor_points_left_fine,
     T_coarse,
     coord_index_left_fine,
     ghost_inds_left_fine,
@@ -199,7 +197,7 @@ factor_mat_coarse = np.where(distance_matrix_coarse <= threshold_distance_coarse
 # ------------------------
 # Temperature update function
 # ------------------------
-def update_temperature(Tcurr, Hcurr, Kmat,Nz_all, Nr_all,
+def update_temperature(T1,Tcurr, Hcurr, Kmat,Nz_all, Nr_all,
                        ghost_inds_top, interior_inds_top,
                        ghost_inds_bottom, interior_inds_bottom,
                        ghost_inds_left, interior_inds_left,
@@ -221,25 +219,25 @@ def update_temperature(Tcurr, Hcurr, Kmat,Nz_all, Nr_all,
     # Apply boundary conditions
 
     if coarse == 1:
-        Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
         Tnew = grid_generator_rectangle.interpolate_temperature_for_coarse(
           Tnew,
-          neighbor_points_right_coarse,
           T_fine,
           coord_index_coarse,
           ghost_inds_right_coarse,
           axis=1)
+        Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
 
     else:
-        Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
+
         Tnew = grid_generator_rectangle.interpolate_temperature_for_fine(
             Tnew,
-            neighbor_points_left_fine,
             T_coarse,
             coord_index_left_fine,
             ghost_inds_left_fine,
             axis=1,
         )
+        Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
+
     Knew = cf.build_K_matrix(Tnew, cf.compute_thermal_conductivity_matrix, factor_mat,
                              partial_area_matrix, shape_factor_matrix,
                              distance_matrix, horizon_mask, true_indices, ks, kl, Ts, Tl, delta, r_flat,
@@ -285,18 +283,7 @@ save_steps = [int(t * 3600 / dt) for t in save_times]
 T_record = []  # Store temperature snapshots
 
 for step in range(nsteps):
-
-    T_fine, H_fine, Kmat_fine = update_temperature(T_fine, H_fine, Kmat_fine, Nz_all_fine, Nr_all_fine,
-                                                   ghost_inds_top_fine, interior_inds_top_fine,
-                                                   ghost_inds_bottom_fine, interior_inds_bottom_fine,
-                                                   ghost_inds_left_fine, interior_inds_left_fine,
-                                                   ghost_inds_right_fine, interior_inds_right_fine,
-                                                   factor_mat_fine,
-                                                   partial_area_matrix_fine, shape_factor_matrix_fine,
-                                                   distance_matrix_fine, horizon_mask_fine, true_indices_fine,
-                                                   delta_fine, r_flat_fine, dt,  coarse=0
-                                                   )
-    T_coarse, H_coarse, Kmat_coarse = update_temperature(
+    T_coarse, H_coarse, Kmat_coarse = update_temperature(T_fine,
         T_coarse, H_coarse, Kmat_coarse, Nz_all_coarse, Nr_all_coarse,
         ghost_inds_top_coarse, interior_inds_top_coarse,
         ghost_inds_bottom_coarse, interior_inds_bottom_coarse,
@@ -305,8 +292,16 @@ for step in range(nsteps):
         factor_mat_coarse,
         partial_area_matrix_coarse, shape_factor_matrix_coarse,
         distance_matrix_coarse, horizon_mask_coarse, true_indices_coarse,
-        delta_coarse, r_flat_coarse, dt, coarse=1
-    )
+        delta_coarse, r_flat_coarse, dt, coarse=1)
+    T_fine, H_fine, Kmat_fine = update_temperature(T_coarse,T_fine, H_fine, Kmat_fine, Nz_all_fine, Nr_all_fine,
+                                                   ghost_inds_top_fine, interior_inds_top_fine,
+                                                   ghost_inds_bottom_fine, interior_inds_bottom_fine,
+                                                   ghost_inds_left_fine, interior_inds_left_fine,
+                                                   ghost_inds_right_fine, interior_inds_right_fine,
+                                                   factor_mat_fine,
+                                                   partial_area_matrix_fine, shape_factor_matrix_fine,
+                                                   distance_matrix_fine, horizon_mask_fine, true_indices_fine,
+                                                   delta_fine, r_flat_fine, dt,  coarse=0)
     if step == 100/dt:
         aa=1
     if step in save_steps:
