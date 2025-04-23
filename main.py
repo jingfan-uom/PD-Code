@@ -254,7 +254,7 @@ H_coarse = cf.get_enthalpy(T_coarse, rho_l, cs, cl, L, Ts, Tl) # Initial enthalp
 # ------------------------
 # Simulation loop settings
 # ------------------------
-dt = 1  # Time step in seconds
+dt = 5  # Time step in seconds
 
 # Build initial conductivity matrix
 
