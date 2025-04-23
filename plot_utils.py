@@ -1,17 +1,19 @@
-import matplotlib.pyplot as plt
+
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
 from matplotlib.ticker import MultipleLocator
 
 def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     T_min = np.min(T)
     T_max = np.max(T)
-
+    print("Z_all range:", np.min(Z_all), np.max(Z_all))
     plt.figure(figsize=(6, 5))
-    levels = np.arange(300, 400, 5)  # 到 380，右边闭区间建议设成 385
+    levels = np.arange(270 ,380, 5)  # 到 380，右边闭区间建议设成 385
 
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, 0.4])
-    plt.ylim([0.0, 0.4])
+    plt.xlim([0.00, 0.05])
+    plt.ylim([0., 0.1])
     cbar = plt.colorbar(ctf)
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
     plt.xlabel("r (m)")
@@ -19,22 +21,8 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.show()
 
-def temperature_fine(R_all, Z_all, T, total_time, nsteps,dt):
-    T_min = np.min(T)
-    T_max = np.max(T)
 
-    plt.figure(figsize=(6, 5))
-    levels = np.arange(300, 405, 5)  # 到 380，右边闭区间建议设成 385
 
-    ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.4, 0.6])
-    plt.ylim([0.0, 0.4])
-    cbar = plt.colorbar(ctf)
-    cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
-    plt.xlabel("r (m)")
-    plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
-    plt.show()
 
 def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     """
@@ -61,8 +49,8 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.xlabel("r (m)")
     plt.ylabel("Temperature at z = 0.4 m (K)")
     plt.title("z = 0.4 m Cross-sectional Temperature Evolution")
-    plt.xlim(0.2, 1.0)
-    plt.ylim(200, 400)
+    plt.xlim(0., .5)
+    plt.ylim(1, 400)
 
     plt.gca().yaxis.set_major_locator(MultipleLocator(50))
     plt.gca().yaxis.set_minor_locator(MultipleLocator(25))
@@ -75,79 +63,63 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.show()
 
 
-def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
-    """
-    Plot 1D temperature profile (r-direction only), with optional saving.
-
-    Parameters:
-    -----------
-    r_all : 1D array
-        Radial coordinate (including ghost nodes if any).
-    T : 1D or 2D array
-        Temperature field. If 2D, it will be flattened.
-    time_seconds : float
-        Simulation time in seconds (for labeling).
-    save_dir : str, optional
-        If provided, saves the plot to the specified directory.
-    """
-    T = T.flatten()
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(r_all, T, 'r-', linewidth=2)
-    plt.xlabel("r (m)")
-    plt.ylabel("Temperature (K)")
-    plt.xlim(0.05, 1.45)
-    plt.ylim(300, 500)
-    plt.title(f"1D Temperature Distribution at t = {time_seconds/3600:.2f} h")
-    plt.grid(True)
-    plt.tight_layout()
-
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        fname = f"T_1D_{int(time_seconds)}s.png"
-        plt.savefig(os.path.join(save_dir, fname))
-        print(f"[plot] Saved 1D temperature plot to {os.path.join(save_dir, fname)}")
-    else:
-        plt.show()
-
-    plt.close()
 
 
-def plot_combined_temperature_contour(
-        Rmat_fine: np.ndarray,
-        Zmat_fine: np.ndarray,
-        T_fine: np.ndarray,
-        Rmat_coarse: np.ndarray,
-        Zmat_coarse: np.ndarray,
-        T_coarse: np.ndarray,
-        nsteps: int,
-        total_time: float,
-        levels=np.arange(270, 385, 5)
+def temperature_combined(
+    Rmat_coarse, Zmat_coarse, T_coarse,
+    Rmat_fine, Zmat_fine, T_fine,
+    total_time, nsteps,
+    levels,
+    r_start_coarse,Lr_coarse,dr_coarse,ghost_nodes_r_coarse,
+    r_start_fine,Lr_fine,dr_fine,ghost_nodes_r_fine
 ):
     """
-    将 fine 和 coarse 网格的温度合并后插值为规则网格，并绘制等高填色图。
-
-    参数：
-    - Rmat_fine, Zmat_fine: 细网格的坐标矩阵
-    - T_fine: 细网格温度矩阵
-    - Rmat_coarse, Zmat_coarse: 粗网格的坐标矩阵
-    - T_coarse: 粗网格温度矩阵
-    - nsteps: 当前模拟的步数
-    - total_time: 当前模拟的累计时间（单位：秒）
-    - levels: 等高线温度层级
+    将 coarse 和 fine 的温度场合并，在一张图中绘制（只包含物理区域）。
+    自动计算掩码，无需手动传入。
     """
 
-    # 合并所有坐标和温度为一维
-    R_all = np.concatenate([Rmat_fine.flatten(), Rmat_coarse.flatten()])
-    Z_all = np.concatenate([Zmat_fine.flatten(), Zmat_coarse.flatten()])
-    T_all = np.concatenate([T_fine.flatten(), T_coarse.flatten()])
+    # --- 1. 计算物理区域边界 ---
+    # --- 1. 计算物理区域边界（包含鬼点） ---
+    r_phys_min_fine = np.min(Rmat_fine +r_start_fine - ghost_nodes_r_fine * dr_fine + dr_fine/2)
+    r_phys_max_fine = np.max(Rmat_fine)
+    z_phys_min_fine = np.min(Zmat_fine)
+    z_phys_max_fine = np.max(Zmat_fine)
 
-    # 创建规则网格以便插值
-    r_lin = np.linspace(np.min(R_all), np.max(R_all), 300)
-    z_lin = np.linspace(np.min(Z_all), np.max(Z_all), 300)
+    r_phys_min_coarse = np.min(Rmat_coarse)
+    r_phys_max_coarse = np.max(Rmat_coarse - r_start_coarse + Lr_coarse + dr_coarse/2 + (ghost_nodes_r_coarse - 1) * dr_coarse)
+    z_phys_min_coarse = np.min(Zmat_coarse)
+    z_phys_max_coarse = np.max(Zmat_coarse)
+
+    # --- 2. 自动生成掩码 ---
+    fine_mask_phys = (Rmat_fine >= r_phys_min_fine ) & (Rmat_fine <= r_phys_max_fine) & \
+                     (Zmat_fine >= z_phys_min_fine) & (Zmat_fine <= z_phys_max_fine)
+
+    coarse_mask_phys = (Rmat_coarse >= r_phys_min_coarse) & (Rmat_coarse <= r_phys_max_coarse) & \
+                       (Zmat_coarse >= z_phys_min_coarse) & (Zmat_coarse <= z_phys_max_coarse)
+
+    # --- 3. 合并物理区域坐标与温度 ---
+    R_f = Rmat_fine[fine_mask_phys].flatten()
+    Z_f = Zmat_fine[fine_mask_phys].flatten()
+    T_f = T_fine[fine_mask_phys].flatten()
+
+    R_c = Rmat_coarse[coarse_mask_phys].flatten()
+    Z_c = Zmat_coarse[coarse_mask_phys].flatten()
+    T_c = T_coarse[coarse_mask_phys].flatten()
+
+    R_all = np.concatenate([R_f, R_c])
+    Z_all = np.concatenate([Z_f, Z_c])
+    T_all = np.concatenate([T_f, T_c])
+
+    # --- 4. 插值至规则网格 ---
+    r_min = min(r_phys_min_fine, r_phys_min_coarse)
+    r_max = max(r_phys_max_fine, r_phys_max_coarse)
+    z_min = min(z_phys_min_fine, z_phys_min_coarse)
+    z_max = max(z_phys_max_fine, z_phys_max_coarse)
+
+    r_lin = np.linspace(r_min, r_max, 300)
+    z_lin = np.linspace(z_min, z_max, 300)
     R_grid, Z_grid = np.meshgrid(r_lin, z_lin)
 
-    # 插值到规则网格
     T_grid = griddata(
         points=np.stack((R_all, Z_all), axis=-1),
         values=T_all,
@@ -155,19 +127,21 @@ def plot_combined_temperature_contour(
         method='linear'
     )
 
-    # 提取有效温度范围（排除插值空洞）
     T_min = np.nanmin(T_grid)
     T_max = np.nanmax(T_grid)
 
-    # 绘图
-    plt.figure(figsize=(6, 5))
+    # --- 5. 绘图 ---
+    plt.figure(figsize=(7, 5))
     ctf = plt.contourf(R_grid, Z_grid, T_grid, levels=levels, cmap='jet')
-    plt.xlim([np.min(R_all), np.max(R_all)])
-    plt.ylim([np.min(Z_all), np.max(Z_all)])
+
+    plt.xlim([0, 0.1])
+    plt.ylim([0, 0.1])
+
     cbar = plt.colorbar(ctf)
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
+
     plt.xlabel("r (m)")
     plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
+    plt.title(f"Combined Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.tight_layout()
     plt.show()

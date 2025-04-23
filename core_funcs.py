@@ -6,29 +6,17 @@ def compute_shape_factor_matrix(Rmat, true_indices):
     r_flat = Rmat.flatten()
     shape_factor_matrix = np.zeros((len(r_flat), len(r_flat)))
     for i, j in zip(*true_indices):
-        shape_factor_matrix[i, j] = 1
+        shape_factor_matrix[i, j] = 1 # (2 * r_flat[j]) / (r_flat[i] + r_flat[j])
     return shape_factor_matrix
 
 
 # Return thermal conductivity field (assumed constant here)
-def get_thermal_conductivity(Tarr, k_s, k_l, T_solidus, T_liquidus, delta, dz):
-    """
-    Tarr: 温度场（可为 1D 或 2D）
-    k_f: 固相导热率（低温侧）
-    k_m: 液相导热率（高温侧）
-    T_solidus, T_liquidus: 相变起止温度；若相等则为单点相变
-    delta: 视界大小，用于非局部归一化系数
-    返回: 热导率场 lam，与 Tarr 形状相同
-    """
+def get_thermal_conductivity(Tarr, k_s, k_l, T_solidus, T_liquidus, delta):
 
-    if dz == 0:
-        base_factor = 1.0 / delta
-    else:
-        pi = np.pi
-        base_factor = 4.0 / (pi * delta ** 2)
 
+    pi = np.pi
+    base_factor = 4.0 / (pi * delta ** 2)
     lam = np.zeros_like(Tarr)
-
     # 固态区
     lam[Tarr < T_solidus] = k_s
     # 液态区
@@ -41,9 +29,9 @@ def get_thermal_conductivity(Tarr, k_s, k_l, T_solidus, T_liquidus, delta, dz):
     return lam * base_factor
 
 # Build a matrix of pairwise thermal conductivities for each i-j pair within the horizon
-def compute_thermal_conductivity_matrix(Tarr, k_s, k_l, T_solidus, T_liquidus, delta, r_flat, true_indices,dz):
+def compute_thermal_conductivity_matrix(Tarr, k_s, k_l, T_solidus, T_liquidus, delta, r_flat, true_indices):
 
-    lambda_flat = get_thermal_conductivity(Tarr.flatten(), k_s, k_l, T_solidus, T_liquidus, delta,dz)
+    lambda_flat = get_thermal_conductivity(Tarr.flatten(), k_s, k_l, T_solidus, T_liquidus, delta)
     N = len(r_flat)
     thermal_conductivity_matrix = np.zeros((N, N), dtype=float)
 
@@ -54,16 +42,8 @@ def compute_thermal_conductivity_matrix(Tarr, k_s, k_l, T_solidus, T_liquidus, d
 
 # Convert temperature to enthalpy
 def get_enthalpy(Tarr, rho, cs, cl, L, T_solidus, T_liquidus):
-    """
-    Tarr: 温度数组 (N,) 或 (Nr, Nz)
-    rho, Cs, Cl, L: 同形状的材料属性数组
-    T_solidus, T_liquidus: 标量或可广播数组
-    当 T_solidus == T_liquidus 时，即刀切式相变
-    返回: 总焓 H
-    """
+
     H = np.zeros_like(Tarr)
-
-
 
     # =============== 三段处理 ===============
     mask_solid = Tarr < T_solidus
@@ -74,8 +54,7 @@ def get_enthalpy(Tarr, rho, cs, cl, L, T_solidus, T_liquidus):
     H[mask_solid] = rho * cs * Tarr[mask_solid]
 
     # (2) 相变区间
-    # 注意：当 (T_liquidus - T_solidus) 很小也可能导致数值不稳定
-    # 建议实际中加上 epsilon 处理
+
     dT = (T_liquidus - T_solidus)
     alpha = (Tarr[mask_phase] - T_solidus) / dT
     # 显热 + 部分潜热: Cs * T_solidus + alpha * L
@@ -95,12 +74,8 @@ def get_enthalpy(Tarr, rho, cs, cl, L, T_solidus, T_liquidus):
 
 # Convert enthalpy back to temperature
 def get_temperature(Harr, rho, Cs, Cl, L, T_solidus, T_liquidus):
-    """
-    Harr: 焓数组 (N,) 或 (Nr, Nz)
-    当 T_solidus == T_liquidus => 单点相变
-    """
-    T = np.zeros_like(Harr)
 
+    T = np.zeros_like(Harr)
 
      # 1) 固态区焓阈值
     H_solid_max = rho * Cs * T_solidus
@@ -111,20 +86,12 @@ def get_temperature(Harr, rho, Cs, Cl, L, T_solidus, T_liquidus):
     mask_phase = (Harr > H_solid_max) & (Harr <= H_liquid_min)
     mask_liquid = Harr > H_liquid_min
 
-    # 固态: T = H / (ρ Cs)
     T[mask_solid] = Harr[mask_solid] / (rho * Cs)
 
-    # 相变: α = [H - H_solid_max]/(ρ L)
-    # T = T_solidus + α*(T_liquidus - T_solidus)
     dT = (T_liquidus - T_solidus)
     alpha = (Harr[mask_phase] - H_solid_max) / (rho * L)
     T[mask_phase] = T_solidus + alpha * dT
 
-    # 液态: T = ...
-    # (H - [Cs*T_solidus + L]) / (rho*Cl) + T_liquidus
-    # = { Harr - [H_solid_max + rho*L] } / (rho Cl) + T_liquidus
-    # 其中 H_solid_max = rho*Cs*T_solidus
-    #     [H_solid_max + rho*L] = rho*(Cs*T_solidus + L)
     denom = rho * Cl
     H_adj = Harr[mask_liquid] - (H_solid_max + rho*L)
     T[mask_liquid] = H_adj/denom + T_liquidus
@@ -136,9 +103,9 @@ def get_temperature(Harr, rho, Cs, Cl, L, T_solidus, T_liquidus):
 # Construct the global conductivity matrix K for nonlocal heat transfer
 def build_K_matrix(Tarr, compute_thermal_conductivity_matrix, factor_mat,
                    partial_area_matrix, shape_factor_matrix,
-                   distance_matrix, horizon_mask, true_indices, k_s, k_l, T_s,T_l, delta, r_flat,dt,dz):
+                   distance_matrix, horizon_mask, true_indices, k_s, k_l, T_s,T_l, delta, r_flat,dt):
     N = len(r_flat)
-    cond_mat = compute_thermal_conductivity_matrix(Tarr, k_s, k_l, T_s,T_l, delta, r_flat, true_indices,dz)
+    cond_mat = compute_thermal_conductivity_matrix(Tarr, k_s, k_l, T_s,T_l, delta, r_flat, true_indices)
     K1 = np.zeros((N, N))
 
     # Off-diagonal terms (i ≠ j)

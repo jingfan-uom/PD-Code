@@ -14,7 +14,7 @@ def get_coarse_neighbor_points(
         dz_fine: float,
         r_all_fine: np.ndarray,
         z_all_fine: np.ndarray,
-        axis: int = 0,
+        axis,
         tol: float = 1e-10,
 ):
     """
@@ -25,7 +25,7 @@ def get_coarse_neighbor_points(
         coord2index: dict {robust_key(r, z): (i_z, i_r)} based on r_all_fine/z_all_fine
     """
     Nz, Nr = Rmat_coarse.shape
-    N_per_line = Nz - 6 if axis == 0 else Nr - 6
+    N_per_line = Nz - 6 if axis == 1 else Nr - 6
     N_ghost = len(ghost_indices) * N_per_line
 
     neighbor_points = np.empty((N_ghost, 4, 2))
@@ -34,7 +34,7 @@ def get_coarse_neighbor_points(
     index = 0
     for idx in ghost_indices:
         for i in range(N_per_line):
-            if axis == 0:
+            if axis == 1:
                 r = Rmat_coarse[i + 3, idx]
                 z = Zmat_coarse[i + 3, idx]
             else:
@@ -79,7 +79,7 @@ def interpolate_temperature_for_coarse(
         ):
 
     Nz_coarse, Nr_coarse = T_coarse.shape
-    N_per_line = Nz_coarse-6 if axis == 0 else Nr_coarse-6
+    N_per_line = Nz_coarse-6 if axis == 1 else Nr_coarse-6
 
     index = 0
     for idx in ghost_indices:
@@ -92,7 +92,7 @@ def interpolate_temperature_for_coarse(
                     temps.append(T_fine[idx_z, idx_r])
                 else:
                     raise ValueError(f"Coordinate {key} not found in fine grid.")
-            if axis == 0:
+            if axis == 1:
                 row, col = i+3, idx
             else:
                 row, col = idx, i+3
@@ -113,10 +113,10 @@ def get_fine_neighbor_points(
     Zmat_coarse: np.ndarray,
     r_all_coarse: np.ndarray,
     z_all_coarse: np.ndarray,
-    axis: int = 0,
+    axis,
 ):
     Nz, Nr = Rmat_fine.shape
-    N_per_line = Nz - 6 if axis == 0 else Nr - 6
+    N_per_line = Nz - 6 if axis == 1 else Nr - 6
     N_target = len(target_indices) * N_per_line
 
     neighbor_points = np.empty((N_target, 3, 2))
@@ -131,7 +131,7 @@ def get_fine_neighbor_points(
 
     for idx in target_indices:
         for i in range(N_per_line):
-            if axis == 0:
+            if axis == 1:
                 r = Rmat_fine[i + 3, idx]
                 z = Zmat_fine[i + 3, idx]
             else:
@@ -142,8 +142,10 @@ def get_fine_neighbor_points(
             nearby_mask = (dists <= radius)
             nearby_coords = coords_flat[nearby_mask]
 
-            if len(nearby_coords) < 3:
+            if len(nearby_coords) < 3 :
                 raise ValueError(f"Not enough coarse neighbors found for fine point ({r}, {z})")
+            if len(nearby_coords) > 3 :
+                raise ValueError(f"Too much coarse neighbors found for fine point ({r}, {z})")
 
             neighbor_points[index] = nearby_coords
 
@@ -167,16 +169,16 @@ def interpolate_temperature_for_fine(
     T_coarse: np.ndarray,
     coord2index: dict,
     ghost_indices: np.ndarray,
-    axis: int,
+    axis,
 ):
     Nz_fine, Nr_fine = T_fine.shape
-    N_per_line = Nz_fine - 6 if axis == 0 else Nr_fine - 6
+    N_per_line = Nz_fine - 6 if axis == 1 else Nr_fine - 6
     T_result = T_fine.copy()
 
     index = 0
     for idx in ghost_indices:
         for i in range(N_per_line):
-            if axis == 0:
+            if axis == 1:
                 row, col = i+3, idx
             else:
                 row, col = idx, i+3
