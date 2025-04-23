@@ -12,10 +12,14 @@ import area_matrix_calculator
 # ------------------------
 # Physical and simulation parameters
 # ------------------------
-k_mat = 50.0             # Thermal conductivity (W/m·K)
-rho_mat = 7850.0         # Density (kg/m³)
-Cp_mat = 420.0           # Specific heat capacity (J/kg·K)
-Lr, Lz = 0.8, 0.8        # Domain size in r and z directions (meters)
+
+rho_s, cs, ks = 1000.0, 2060.0, 2.14
+rho_l, cl, kl = 1000.0, 4182.0, 0.6
+Ts = 272.65
+Tl = 273.65
+L = 333
+
+Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
 Nr, Nz = 40, 40          # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
@@ -29,7 +33,7 @@ ghost_nodes_z = 3        # Number of ghost cells in the z direction
 # ------------------------
 # Construct grid coordinates (including ghost layers)
 # ------------------------
-r_start = 0.2  # Starting position in r-direction
+r_start = 0.  # Starting position in r-direction
 tolerance = 1e-8
 
 # ==========================
@@ -95,28 +99,33 @@ factor_mat = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 
 # ------------------------
 # Temperature update function
 # ------------------------
-def update_temperature(Tcurr, Hcurr):
-    flux = Kmat @ Tcurr.flatten()               # Apply nonlocal heat flux
+def update_temperature(Tcurr, Hcurr, Kcurr):
+    flux = Kcurr @ Tcurr.flatten()               # Apply nonlocal heat flux
     flux = flux.reshape(Nz_tot, Nr_tot)         # Reshape to 2D
     flux[(flux > -tolerance) & (flux < tolerance)] = 0  # Eliminate small fluctuations
 
     Hnew = Hcurr + flux                          # Update enthalpy
-    Tnew = cf.get_temperature(Hnew, rho_mat, Cp_mat)  # Convert to temperature
+    Tnew = cf.get_temperature(Hnew, rho_s, cs, cl, L, Ts, Tl)   # Convert to temperature
 
     # Apply boundary conditions
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_top, interior_inds_top, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_bottom, interior_inds_bottom, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
-    Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_right, interior_inds_right,
-                                              T_bc=500.0, axis=1, z_mask=z_mask)
-    return Tnew, Hnew
+
+    Knew = cf.build_K_matrix(Tnew, cf.compute_thermal_conductivity_matrix, factor_mat,
+                             partial_area_matrix, shape_factor_matrix,
+                             distance_matrix, horizon_mask, true_indices, r_flat,
+                             ks, kl, Ts, Tl, delta, dz, dt)
+
+    return Tnew, Hnew, Knew
 
 # ------------------------
 # Initialization
 # ------------------------
-T = np.full(Rmat.shape, 200)  # Initial temperature field (uniform 200 K)
-
+ice_region_mask = (Rmat < 0.04 +tolerance) & (Zmat < 0.04 +tolerance)
+T = np.full(Rmat.shape, 373.15)  # Initial temperature field (uniform 200 K)
+T[ice_region_mask] = 268.15
 # Get ghost node indices from bc_funcs
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_bottom, interior_inds_bottom = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z)
@@ -130,11 +139,9 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_right, interior_inds_right, axis=1)
 
 # Only apply Dirichlet on right side within this z region
-z_mask = (z_all >= 0.30 - 1e-8) & (z_all <= 0.50 + tolerance)
-T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right, interior_inds_right,
-                                       T_bc=500.0, axis=1, z_mask=z_mask)
 
-H = cf.get_enthalpy(T, rho_mat, Cp_mat)  # Initial enthalpy
+
+H = cf.get_enthalpy(T, rho_s, cs, cl, L, Ts, Tl)  # Initial enthalpy
 
 # ------------------------
 # Simulation loop settings
@@ -145,9 +152,11 @@ dt = 5  # Time step in seconds
 Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
                          partial_area_matrix, shape_factor_matrix,
                          distance_matrix, horizon_mask, true_indices, r_flat,
-                         k_mat, delta, dt)
+                         ks, kl, Ts, Tl, delta, dz, dt)
 
-total_time = 5 * 3600  # Total simulation time (5 hours)
+
+
+total_time = 600  # Total simulation time (5 hours)
 nsteps = int(total_time / dt)
 print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
 print(f"Total steps: {nsteps}")
@@ -161,14 +170,15 @@ save_steps = [int(t * 3600 / dt) for t in save_times]
 T_record = []  # Store temperature snapshots
 
 for step in range(nsteps):
-    T, H = update_temperature(T, H)
+    T, H, Kmat = update_temperature(T, H,Kmat)
 
     if step in save_steps:
         T_record.append(T.copy())
 
     if step % print_interval == 0:
         print(f"Step={step}, Simulated time={step * dt:.2f}s")
-
+    if step == 100/dt:
+        aa=1
 end_time = time.time()
 print(f"Calculation finished, elapsed real time = {end_time - start_time:.2f}s")
 

@@ -7,10 +7,11 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     T_max = np.max(T)
 
     plt.figure(figsize=(6, 5))
-    levels = np.linspace(340, 500, 17)
+    levels = np.arange(270, 380, 5)  # 270, 275, 280, ..., 375
+
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.2, 1.0])
-    plt.ylim([0.0, 0.8])
+    plt.xlim([0.0, .1])
+    plt.ylim([0.0, 0.1])
     cbar = plt.colorbar(ctf)
     cbar.set_label(f"Temperature (K)\nMin: {T_min:.2f} K, Max: {T_max:.2f} K")
     plt.xlabel("r (m)")
