@@ -12,23 +12,42 @@ def compute_shape_factor_matrix(Rmat, true_indices):
 
 # Return thermal conductivity field (assumed constant here)
 def get_thermal_conductivity(Tarr, k_s, k_l, T_solidus, T_liquidus, delta, dz):
+    """
+    Compute the thermal conductivity field based on the temperature field.
 
+    Parameters:
+    - Tarr: temperature array
+    - k_s: thermal conductivity in the solid phase
+    - k_l: thermal conductivity in the liquid phase
+    - T_solidus: solidus temperature (below which material is fully solid)
+    - T_liquidus: liquidus temperature (above which material is fully liquid)
+    - delta: horizon radius (for nonlocal models)
+    - dz: cell size in the z-direction (used to distinguish 1D vs 2D)
+
+    Returns:
+    - Thermal conductivity array scaled by the base factor
+    """
     if dz == 0:
         base_factor = 1.0 / delta
     else:
         pi = np.pi
         base_factor = 4.0 / (pi * delta ** 2)
+
     lam = np.zeros_like(Tarr)
-    # 固态区
+
+    # Solid phase
     lam[Tarr < T_solidus] = k_s
-    # 液态区
+
+    # Liquid phase
     lam[Tarr > T_liquidus] = k_l
-    # 相变区间 - 线性插值
+
+    # Phase change region – linear interpolation
     in_transition = (Tarr >= T_solidus) & (Tarr <= T_liquidus)
     alpha = (Tarr[in_transition] - T_solidus) / (T_liquidus - T_solidus)
     lam[in_transition] = (1 - alpha) * k_s + alpha * k_l
 
     return lam * base_factor
+
 
 
 # Build a matrix of pairwise thermal conductivities for each i-j pair within the horizon
