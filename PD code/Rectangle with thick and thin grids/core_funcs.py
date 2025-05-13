@@ -66,24 +66,24 @@ def get_enthalpy(Tarr, rho, cs, cl, L, T_solidus, T_liquidus):
 
     H = np.zeros_like(Tarr)
 
-    # =============== 三段处理 ===============
+    # =============== three-stage processing ===============
     mask_solid = Tarr < T_solidus
     mask_phase = (Tarr >= T_solidus) & (Tarr <= T_liquidus)
     mask_liquid = Tarr > T_liquidus
 
-    # (1) 固态
+    # (1) solid state
     H[mask_solid] = rho * cs * Tarr[mask_solid]
 
-    # (2) 相变区间
+    # (2) phase transition interval
 
     dT = (T_liquidus - T_solidus)
     alpha = (Tarr[mask_phase] - T_solidus) / dT
-    # 显热 + 部分潜热: Cs * T_solidus + alpha * L
+    # sensible heat + some latent heat: Cs * T_solidus + alpha * L
     H[mask_phase] = rho * (
             cs * T_solidus + alpha * L
         )
 
-    # (3) 液态
+    # (3) liquid 
     H[mask_liquid] = rho * (
         cs * T_solidus + L
          + cl * (Tarr[mask_liquid] - T_liquidus)
@@ -98,9 +98,9 @@ def get_temperature(Harr, rho, Cs, Cl, L, T_solidus, T_liquidus):
 
     T = np.zeros_like(Harr)
 
-     # 1) 固态区焓阈值
+     # 1) Enthalpy threshold in the solid state region
     H_solid_max = rho * Cs * T_solidus
-    # 2) 相变区上限: H_solid_max + rho*L
+    # 2) upper limit of the phase transition zone: H_solid_max + rho*L
     H_liquid_min = H_solid_max + rho * L
 
     mask_solid = Harr <= H_solid_max
