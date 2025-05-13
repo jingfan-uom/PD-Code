@@ -13,23 +13,15 @@ import area_matrix_calculator
 # Physical and simulation parameters
 # ------------------------
 
-rho_s, cs, ks = 1800.0, 1688.0, 1
+rho_s, cs, ks = 1000.0, 2060.0, 2.14
 rho_l, cl, kl = 1000.0, 4182.0, 0.6
-Ts = 372.65
-Tl = 373.65
+Ts = 272.65
+Tl = 273.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
 Nr, Nz = 40, 40          # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
-
-E = 25.7e9                # 弹性模量 [Pa]
-nu = 0.25                 # 泊松比
-K = 1.0                    # 热传导系数 [W/(m·K)]
-
-rho = 1800.0              # 密度 [kg/m³]
-C = 1688.0                # 比热容 [J/(kg·K)]
-alpha = 1.8e-5            # 热膨胀系数 [1/K]
 
 if Nz == 1:
     dz = 0  # Treat as 1D if z direction is disabled
@@ -116,12 +108,15 @@ def update_temperature(Tcurr, Hcurr, Kcurr):
     Tnew = cf.get_temperature(Hnew, rho_s, cs, cl, L, Ts, Tl)   # Convert to temperature
 
     # Apply boundary conditions
-    Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_top, interior_inds_top,  274.15, 0)
+    Tnew = bc_funcs.apply_bc_zero_flux(Tnew , ghost_inds_top, interior_inds_top, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_bottom, interior_inds_bottom, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
-    Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_right, interior_inds_right, 274.15, 1)
+    Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
 
-    Knew = Kcurr
+    Knew = cf.build_K_matrix(Tnew , cf.compute_thermal_conductivity_matrix, factor_mat,
+                             partial_area_matrix, shape_factor_matrix,
+                             distance_matrix, horizon_mask, true_indices, r_flat,
+                             ks, kl, Ts, Tl, delta, dz, dt)
 
     return Tnew, Hnew, Knew
 
@@ -129,8 +124,9 @@ def update_temperature(Tcurr, Hcurr, Kcurr):
 # Initialization
 # ------------------------
 
-T = np.full(Rmat.shape, 283.15)  # Initial temperature field (uniform 200 K)
-
+T = np.full(Rmat.shape, 373.15)  # Initial temperature field (uniform 200 K)
+ice_region_mask = (Rmat < 0.04 +tolerance) & (Zmat < 0.04 +tolerance)
+T[ice_region_mask] = 268.15
 # Get ghost node indices from bc_funcs
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_bottom, interior_inds_bottom = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z)
@@ -138,7 +134,7 @@ ghost_inds_left, interior_inds_left = bc_funcs.get_left_ghost_indices(r_all, gho
 ghost_inds_right, interior_inds_right = bc_funcs.get_right_ghost_indices(r_all, ghost_nodes_x)
 
 # Apply initial boundary conditions
-T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top, interior_inds_top,  274.15, 0)
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_top, interior_inds_top, axis=0)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis=0)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_right, interior_inds_right, axis=1)
@@ -160,7 +156,7 @@ Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
 
 
 
-total_time = 200  # Total simulation time (5 hours)
+total_time = 600  # Total simulation time (5 hours)
 nsteps = int(total_time / dt)
 print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
 print(f"Total steps: {nsteps}")
@@ -181,8 +177,7 @@ for step in range(nsteps):
 
     if step % print_interval == 0:
         print(f"Step={step}, Simulated time={step * dt:.2f}s")
-    if step == 100/dt:
-        aa=1
+    
 end_time = time.time()
 
 
