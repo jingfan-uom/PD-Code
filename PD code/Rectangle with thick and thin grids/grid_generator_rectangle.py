@@ -55,7 +55,7 @@ def get_coarse_neighbor_points(
     print("Sample mapping from coarse points to fine neighbors:\n")
     for i, (coarse_idx, fine_list) in enumerate(coarse2fine_indices.items()):
         print(f"Coarse point {coarse_idx} maps to fine points: {fine_list}")
-        if i >= 4:  # 只打印前5个
+        if i >= 4:  # Print only the first 5
               break
 
     return coarse2fine_indices
@@ -118,7 +118,7 @@ def get_fine_neighbor_points(
             r_fine = Rmat_fine[i_z_fine, i_r_fine]
             z_fine = Zmat_fine[i_z_fine, i_r_fine]
 
-            # 寻找 coarse 点
+            # Look for the coarse points.
             dists = np.sqrt((coords_flat[:, 0] - r_fine)**2 + (coords_flat[:, 1] - z_fine)**2)
             nearby_mask = (dists <= radius)
             nearby_coords = coords_flat[nearby_mask]
@@ -173,10 +173,10 @@ def interpolate_temperature_for_fine(
 
             coarse_indices = fine2coarse_indices[fine_key]
 
-            # 根据 coarse indices 提取对应的温度值
+            # Extract the corresponding temperature values from coarse indices
             coarse_temps = [T_coarse[i_z, i_r] for i_z, i_r in coarse_indices]
 
-            # 直接取平均作为 fine 点的温度
+            # Take the average directly as the temperature of the fine point
             T_result[row, col] = np.mean(coarse_temps)
 
     return T_result
