@@ -9,8 +9,7 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dt):
     T_max = np.max(T)
     print("Z_all range:", np.min(Z_all), np.max(Z_all))
     plt.figure(figsize=(6, 5))
-    levels = np.arange(270 ,380, 5)  # 到 380，右边闭区间建议设成 385
-
+    levels = np.arange(270 ,380, 5)  
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
     plt.xlim([0.00, 0.05])
     plt.ylim([0., 0.1])
@@ -62,42 +61,38 @@ def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     plt.tight_layout()
     plt.show()
 
-
-
-
 def temperature_combined(
     Rmat_coarse, Zmat_coarse, T_coarse,
     Rmat_fine, Zmat_fine, T_fine,
-    total_time,time1, nsteps,
+    total_time, time1, nsteps,
     levels,
-    r_start_coarse,Lr_coarse,dr_coarse,dz_coarse,ghost_nodes_r_coarse,
-    r_start_fine,Lr_fine,dr_fine,dz_fine,
+    r_start_coarse, Lr_coarse, dr_coarse, dz_coarse, ghost_nodes_r_coarse,
+    r_start_fine, Lr_fine, dr_fine, dz_fine,
     ghost_nodes_r_fine):
     """
-    将 coarse 和 fine 的温度场合并，在一张图中绘制（只包含物理区域）。
-    自动计算掩码，无需手动传入。
+    Combine the temperature fields of coarse and fine grids and plot them in one figure (physical domain only).
+    The physical region mask is calculated automatically — no need to pass it manually.
     """
 
-    # --- 1. 计算物理区域边界 ---
-    # --- 1. 计算物理区域边界（包含鬼点） ---
-    r_phys_min_fine = np.min(Rmat_fine +  ghost_nodes_r_fine * dr_fine )
+    # --- 1. Compute physical region boundaries (including ghost layers) ---
+    r_phys_min_fine = np.min(Rmat_fine + ghost_nodes_r_fine * dr_fine)
     r_phys_max_fine = np.max(Rmat_fine)
     z_phys_min_fine = np.min(Zmat_fine)
     z_phys_max_fine = np.max(Zmat_fine)
 
     r_phys_min_coarse = np.min(Rmat_coarse)
-    r_phys_max_coarse = np.max(Rmat_coarse - ghost_nodes_r_coarse  * dr_coarse)
+    r_phys_max_coarse = np.max(Rmat_coarse - ghost_nodes_r_coarse * dr_coarse)
     z_phys_min_coarse = np.min(Zmat_coarse)
     z_phys_max_coarse = np.max(Zmat_coarse)
 
-    # --- 2. 自动生成掩码 ---
-    fine_mask_phys = (Rmat_fine >= r_phys_min_fine ) & (Rmat_fine <= r_phys_max_fine) & \
+    # --- 2. Automatically generate masks for physical regions ---
+    fine_mask_phys = (Rmat_fine >= r_phys_min_fine) & (Rmat_fine <= r_phys_max_fine) & \
                      (Zmat_fine >= z_phys_min_fine) & (Zmat_fine <= z_phys_max_fine)
 
     coarse_mask_phys = (Rmat_coarse >= r_phys_min_coarse) & (Rmat_coarse <= r_phys_max_coarse) & \
                        (Zmat_coarse >= z_phys_min_coarse) & (Zmat_coarse <= z_phys_max_coarse)
 
-    # --- 3. 合并物理区域坐标与温度 ---
+    # --- 3. Combine coordinates and temperatures from physical regions ---
     R_f = Rmat_fine[fine_mask_phys].flatten()
     Z_f = Zmat_fine[fine_mask_phys].flatten()
     T_f = T_fine[fine_mask_phys].flatten()
@@ -110,7 +105,7 @@ def temperature_combined(
     Z_all = np.concatenate([Z_f, Z_c])
     T_all = np.concatenate([T_f, T_c])
 
-    # --- 4. 插值至规则网格 ---
+    # --- 4. Interpolate onto a regular grid ---
     r_min = min(r_phys_min_fine, r_phys_min_coarse)
     r_max = max(r_phys_max_fine, r_phys_max_coarse)
     z_min = min(z_phys_min_fine, z_phys_min_coarse)
@@ -130,13 +125,9 @@ def temperature_combined(
     T_min = np.nanmin(T_grid)
     T_max = np.nanmax(T_grid)
 
-
-
-
-    # 多行 colorbar 标签显示温度 + 时间 + 网格信息
-
-    # --- 5. 绘图 ---
-    fig, ax = plt.subplots(figsize=(7, 5))  # 明确获取 fig 和 ax 对象
+    # --- 5. Plotting ---
+    # Multi-line colorbar label shows temperature, time, and grid info
+    fig, ax = plt.subplots(figsize=(7, 5))
     ctf = ax.contourf(R_grid, Z_grid, T_grid, levels=levels, cmap='jet')
     ax.set_xlim([0, 0.1])
     ax.set_ylim([0, 0.1])
@@ -155,3 +146,4 @@ def temperature_combined(
     ax.set_title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.tight_layout()
     plt.show()
+
