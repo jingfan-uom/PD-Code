@@ -10,8 +10,8 @@ def temperature(R_all, Z_all, T, total_time, nsteps,dr,dz,time):
     levels = np.arange(270, 380, 5)  # 270, 275, 280, ..., 375
 
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, 0.01])
-    plt.ylim([0.0, 0.01])
+    plt.xlim([0.0, 0.1])
+    plt.ylim([0.0, 0.1])
     cbar = plt.colorbar(ctf)
     cbar.set_label(
         f"Temperature (K)\n"
