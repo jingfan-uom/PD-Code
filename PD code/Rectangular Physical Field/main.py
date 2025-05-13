@@ -21,10 +21,10 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 40          # Number of cells in r and z directions
+Nr, Nz = 40, 40         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
-E = 1e6                  # Elastic modulus [Pa]
+E = 10e9                  # Elastic modulus [Pa]
 nu = 0.25                # Poisson's ratio
 K = 1.0                  # Thermal conductivity [W/(m·K)]
 alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
@@ -94,14 +94,6 @@ partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
     r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance
 )
 horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
-true_indices = np.where(horizon_mask)
-
-# ------------------------
-# Preprocessing: shape factors, area weights, correction factors
-# ------------------------
-shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
-threshold_distance = np.sqrt(2) * dr
-factor_mat = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
 
 # ------------------------
 # Temperature update function
@@ -120,7 +112,7 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr):
     Az_new = dir_z * c * (Relative_elongation) * partial_area_matrix / rho_s
 
     Ar_new = np.sum(Ar_new, axis=1).reshape(Ur_curr.shape)  # Shape matches Ur_curr
-    Az_new = np.sum(Az_new, axis=1).reshape(Uz_curr.shape)
+    Az_new = np.sum(Az_new, axis=1).reshape(Uz_curr.shape) + bz / rho_s
 
     return Ar_new, Az_new  # Or return other desired quantities
 
@@ -149,7 +141,7 @@ Vz = np.zeros_like(Rmat)  # Axial velocity
 Ar = np.zeros_like(Rmat)  # Radial acceleration
 Az = np.zeros_like(Rmat)  # Axial acceleration
 
-dir_r, dir_z = pfc.compute_direction_matrix(Rmat, Zmat, horizon_mask)
+dir_r, dir_z = pfc.compute_direction_matrix(Rmat, Zmat, Ur, Uz, horizon_mask)
 
 # Get ghost node indices from bc_funcs
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
@@ -158,20 +150,21 @@ ghost_inds_left, interior_inds_left = bc_funcs.get_left_ghost_indices(r_all, gho
 ghost_inds_right, interior_inds_right = bc_funcs.get_right_ghost_indices(r_all, ghost_nodes_x)
 
 # Apply initial boundary conditions
-# Fix left, right, and bottom boundaries (U = 0)
-Ur = bc_funcs.apply_bc_dirichlet_displacement(Ur, ghost_inds_left, interior_inds_left, U_target=0.0, axis=1)
-Ur = bc_funcs.apply_bc_dirichlet_displacement(Ur, ghost_inds_right, interior_inds_right, U_target=0.0, axis=1)
-Uz = bc_funcs.apply_bc_dirichlet_displacement(Uz, ghost_inds_bottom, interior_inds_bottom, U_target=0.0, axis=0)
+bz = np.zeros_like(Rmat)
 
-# Apply a small upward displacement at the top boundary, e.g., 0.000001 m
-Uz = bc_funcs.apply_bc_dirichlet_displacement(Uz, ghost_inds_top, interior_inds_top, U_target=0.000001, axis=0)
+# Pressure value
+pressure = 1000e3  # Pa, downward pressure
+# Normal direction (top boundary pointing downward)
+n = np.array([0.0, 1.0])  # 0: radial component, 1: downward in z
+b_val = -(pressure / delta) * n  # Body force density vector [N/m³]
+bz[ghost_inds_top, :] = b_val[1]  # Should be negative (downward)
 
 # ------------------------
 # Simulation loop settings
 # ------------------------
-dt = 1  # Time step in seconds
-total_time = 100  # Total simulation time (e.g., 5 hours)
-nsteps = int(total_time / dt)
+dt = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
+total_time = 1000  # Total simulation time (e.g., 5 hours)
+nsteps = int(40)
 print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
 print(f"Total steps: {nsteps}")
 start_time = time.time()
@@ -189,12 +182,8 @@ for step in range(nsteps):
     Ur, Uz, Vr_half, Vz_half = compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az)
     Vr, Vz, Ar, Az = compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt)
 
-    Ur = bc_funcs.apply_bc_dirichlet_displacement(Ur, ghost_inds_left, interior_inds_left, U_target=0.0, axis=1)
-    Ur = bc_funcs.apply_bc_dirichlet_displacement(Ur, ghost_inds_right, interior_inds_right, U_target=0.0, axis=1)
-    Uz = bc_funcs.apply_bc_dirichlet_displacement(Uz, ghost_inds_bottom, interior_inds_bottom, U_target=0.0, axis=0)
-
-    # Apply upward displacement at top boundary (e.g., 0.0001 m)
-    Uz = bc_funcs.apply_bc_dirichlet_displacement(Uz, ghost_inds_top, interior_inds_top, U_target=0.0001, axis=0)
+    if step % 10 == 0:
+        print(f"Step {step}/{nsteps} completed")
 
 end_time = time.time()
 print(f"Calculation finished, elapsed real time = {end_time - start_time:.2f}s")
@@ -204,7 +193,7 @@ time = end_time - start_time
 # ------------------------
 # Post-processing: visualization
 # ------------------------
-plot.temperature(Rmat, Zmat, T, total_time, nsteps, dr, dz, time)
+plot.plot_displacement_field(Rmat, Zmat, Ur, Uz, title_prefix="Final Displacement", save=True)
 
 # Optional: 1D profile plots
 """
