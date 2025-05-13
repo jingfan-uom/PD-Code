@@ -91,16 +91,17 @@ ghost_inds_right_fine, interior_inds_right_fine = bc_funcs.get_right_ghost_indic
 Rmat_fine, Zmat_fine = np.meshgrid(r_all_fine, z_all_fine, indexing='xy')
 
 
-# 设置r < 0.2 且 z < 0.2 区域为冰的温度
-ice_region_mask = (Rmat_coarse < 0.04 +tolerance) & (Zmat_coarse < 0.04 +tolerance)
-T_coarse = np.full(Rmat_coarse.shape, 373.15)  # Initial temperature field (uniform 200 K)
+# Set the region with r < 0.04 and z < 0.04 as the ice region (low temperature)
+ice_region_mask = (Rmat_coarse < 0.04 + tolerance) & (Zmat_coarse < 0.04 + tolerance)
+T_coarse = np.full(Rmat_coarse.shape, 373.15)  # Initial temperature field (uniform 373.15 K)
 T_coarse[ice_region_mask] = 268.15
 
-T_fine = np.full(Rmat_fine.shape, 373.15)  # Initial temperature field (uniform 200 K)
-# === 2) 计算 “粗网格接口点” 的温度 ======================================
-# 依赖前面写好的 4 点均值插值函数：
+T_fine = np.full(Rmat_fine.shape, 373.15)  # Initial temperature field (uniform 373.15 K)
+
+# === 2) Compute the temperature at "coarse grid interface points" ==========================
+# This step uses the previously implemented 4-point average interpolation function:
 # get_neighbor_points_array_from_matrices(...)
-# 例如右边界
+
 
 coord_index_coarse = grid_generator_rectangle.get_coarse_neighbor_points(
     Rmat_coarse,
@@ -133,7 +134,8 @@ coord_index_left_fine = grid_generator_rectangle.get_fine_neighbor_points(
     z_all_coarse,
     axis=1)
 
-# === 第二步：插值得到细网格 ghost 区域的温度 ===
+# === Step 2: Interpolate to obtain the temperature in the fine grid ghost region ===
+
 T_fine = grid_generator_rectangle.interpolate_temperature_for_fine(
     T_fine,
     T_coarse,
@@ -159,7 +161,8 @@ z_flat_fine = Zmat_fine.flatten()
 r_flat_coarse = Rmat_coarse.flatten()
 z_flat_coarse = Zmat_coarse.flatten()
 
-# 构造距离矩阵（欧氏距离）
+# Construct the distance matrix (Euclidean distance)
+
 dx_r_fine = r_flat_fine[:, None] - r_flat_fine[None, :]
 dx_z_fine = z_flat_fine[:, None] - z_flat_fine[None, :]
 dx_r_coarse= r_flat_coarse[:, None] - r_flat_coarse[None, :]
@@ -241,7 +244,7 @@ def update_temperature(T1,Tcurr, Hcurr, Kmat,Nz_all, Nr_all,
     Knew = cf.build_K_matrix(Tnew, cf.compute_thermal_conductivity_matrix, factor_mat,
                              partial_area_matrix, shape_factor_matrix,
                              distance_matrix, horizon_mask, true_indices, ks, kl, Ts, Tl, delta, r_flat,
-                             dt)  # k_mat 无需再传
+                             dt)  
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_top, interior_inds_top, axis=0)
     Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_bottom, interior_inds_bottom, axis=0)
 
