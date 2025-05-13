@@ -93,31 +93,31 @@ def apply_bc_dirichlet_mirror(Tarr, ghost_inds, interior_inds, T_bc,
 
 def apply_bc_dirichlet_displacement(Uarr, ghost_inds, interior_inds, U_target, axis):
     """
-    对指定边界施加镜像型 Dirichlet 位移边界条件。
+    Apply mirror-type Dirichlet displacement boundary conditions to the specified boundary.
 
-    参数：
-    - Uarr: 当前位移场 (二维数组，例如 Ur 或 Uz)
-    - ghost_inds: ghost 区域粒子索引（列表或数组）
-    - interior_inds: ghost 区域镜像对应的 interior 粒子索引（列表或数组）
-    - U_target: 目标边界位移值（标量，例如 0.0 或 0.001）
-    - axis: 方向，0 表示 z 方向（上下边界），1 表示 r 方向（左右边界）
+    Parameters:
+    - Uarr: current displacement field (2D array, e.g., Ur or Uz)
+    - ghost_inds: indices of ghost region particles (list or array)
+    - interior_inds: indices of interior particles mirrored to the ghost region (list or array)
+    - U_target: target boundary displacement value (scalar, e.g., 0.0 or 0.001)
+    - axis: direction, 0 for z-direction (top/bottom boundary), 1 for r-direction (left/right boundary)
 
-    返回：
-    - 更新后的 Uarr（已在 ghost 区域施加边界）
+    Returns:
+    - Updated Uarr with boundary conditions applied to ghost regions
     """
-    # 遍历 ghost 行或列
     if axis == 0:
-        # z方向：逐列处理每个 ghost 行
+        # z-direction: apply boundary condition row by row
         for g_idx, i_idx in zip(ghost_inds, interior_inds):
             Uarr[g_idx, :] = 2 * U_target - Uarr[i_idx, :]
     elif axis == 1:
-        # r方向：逐行处理每个 ghost 列
+        # r-direction: apply boundary condition column by column
         for g_idx, i_idx in zip(ghost_inds, interior_inds):
             Uarr[:, g_idx] = 2 * U_target - Uarr[:, i_idx]
     else:
-        raise ValueError("axis 只能为 0（z方向）或 1（r方向）")
+        raise ValueError("axis must be 0 (z-direction) or 1 (r-direction)")
 
     return Uarr
+
 
 
 def get_top_ghost_indices(z_all, ghost_nodes_z):
