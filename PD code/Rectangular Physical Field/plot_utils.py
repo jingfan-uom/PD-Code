@@ -1,102 +1,115 @@
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import MultipleLocator
 
-def temperature(R_all, Z_all, T, total_time, nsteps,dr,dz,time):
-    T_min = np.min(T)
-    T_max = np.max(T)
 
-    plt.figure(figsize=(6, 5))
-    levels = np.arange(270, 380, 5)  # 270, 275, 280, ..., 375
-
-    ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, 0.01])
-    plt.ylim([0.0, 0.01])
-    cbar = plt.colorbar(ctf)
-    cbar.set_label(
-        f"Temperature (K)\n"
-        f"Computation time: {time:.1f} s\n"
-        f"Δr = {dr:.4f}, Δz = {dz:.4f}\n"
-        f"Min: {T_min:.2f} K, Max: {T_max:.2f} K"
-    )
-    plt.xlabel("r (m)")
-    plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
-    plt.show()
-
-def plot_z_profile(T_record, z_all, r_all, save_times_hours):
+def compute_direction_matrix(X, Y, Ux, Uz, horizon_mask):
     """
-    Plot temperature evolution over time at a fixed z slice (z = 0.4 m).
+    Compute updated direction matrix based on current relative positions: (x' + u') - (x + u)
+
+    Inputs:
+    - X, Y: coordinate grids (Ny, Nx)
+    - Ux, Uz: displacement fields (Ny, Nx)
+    - horizon_mask: (N, N) interaction mask
+
+    Outputs:
+    - dir_x, dir_z: direction unit vectors (N, N)
+    """
+    x = X.flatten()
+    y = Y.flatten()
+    ux = Ux.flatten()
+    uz = Uz.flatten()
+
+    # Current relative positions: (x' + u') - (x + u)
+    dx_eff = (x[None, :] + ux[None, :]) - (x[:, None] + ux[:, None])
+    dz_eff = (y[None, :] + uz[None, :]) - (y[:, None] + uz[:, None])
+
+    dist_eff = np.sqrt(dx_eff**2 + dz_eff**2)
+    dist_eff[~horizon_mask] = 1.0  # avoid division by zero outside horizon
+
+    dir_x = np.where(horizon_mask, dx_eff / dist_eff, 0.0)
+    dir_z = np.where(horizon_mask, dz_eff / dist_eff, 0.0)
+
+    return dir_x, dir_z
+
+
+
+def compute_s_matrix(X, Y, Ux, Uz, horizon_mask):
+    """
+    Compute the elongation matrix s_matrix (N, N) using 2D grid input and horizon_mask.
 
     Parameters:
-    -----------
-    T_record : list of 2D arrays
-        Temperature snapshots at different times.
-    z_all : 1D array
-        z coordinates.
-    r_all : 1D array
-        r coordinates.
-    save_times_hours : list of floats
-        Simulation times (in hours) corresponding to T_record.
+        X, Y: original mesh coordinates (Ny, Nx)
+        Ux, Uz: displacement fields at corresponding points (Ny, Nx)
+        horizon_mask: boolean array of shape (N, N)
+
+    Returns:
+        s_matrix: elongation matrix of shape (N, N)
     """
-    z_target = 0.4
-    z_index = np.argmin(np.abs(z_all - z_target))
+    # Deformed coordinates
+    x_def = (Ux + X).flatten()
+    y_def = (Uz + Y).flatten()
+    # Original coordinates
+    x_flat = X.flatten()
+    y_flat = Y.flatten()
 
-    plt.figure(figsize=(8, 5))
-    for T, t_hour in zip(T_record, save_times_hours):
-        plt.plot(r_all, T[z_index, :], label=f"{t_hour} h")
+    # Initial lengths
+    dx0 = x_flat[None, :] - x_flat[:, None]
+    dz0 = y_flat[None, :] - y_flat[:, None]
+    L0 = np.sqrt(dx0 ** 2 + dz0 ** 2)
 
-    plt.xlabel("r (m)")
-    plt.ylabel("Temperature at z = 0.4 m (K)")
-    plt.title("z = 0.4 m Cross-sectional Temperature Evolution")
-    plt.xlim(0.2, 1.0)
-    plt.ylim(200, 500)
+    # Deformed lengths
+    dx1 = x_def[None, :] - x_def[:, None]
+    dz1 = y_def[None, :] - y_def[:, None]
+    L1 = np.sqrt(dx1 ** 2 + dz1 ** 2)
 
-    plt.gca().yaxis.set_major_locator(MultipleLocator(50))
-    plt.gca().yaxis.set_minor_locator(MultipleLocator(25))
-    plt.tick_params(axis='y', which='minor', length=4, color='gray')
-    plt.tick_params(axis='y', which='major', length=7)
+    # Avoid division by zero
+    L0[L0 == 0] = 1.0
 
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # Elongation computation
+    s_matrix = np.zeros_like(L0)
+    s_matrix[horizon_mask] = (L1[horizon_mask] - L0[horizon_mask]) / L0[horizon_mask]
+
+    return s_matrix
 
 
-def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
+def compute_delta_temperature(T_grid, horizon_mask, T_prev_avg):
     """
-    Plot 1D temperature profile (r-direction only), with optional saving.
+    Compute the average temperature matrix T_avg (N, N), and optionally return the delta
+    compared to the previous time step average temperature.
 
     Parameters:
-    -----------
-    r_all : 1D array
-        Radial coordinate (including ghost nodes if any).
-    T : 1D or 2D array
-        Temperature field. If 2D, it will be flattened.
-    time_seconds : float
-        Simulation time in seconds (for labeling).
-    save_dir : str, optional
-        If provided, saves the plot to the specified directory.
+        T_grid: 2D temperature field array (Ny, Nx)
+        horizon_mask: boolean array of shape (N, N)
+        T_prev_avg: previous time step average temperature matrix, shape (N, N)
+
+    Returns:
+        T_delta: difference between current and previous average temperature matrices
     """
-    T = T.flatten()
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(r_all, T, 'r-', linewidth=2)
-    plt.xlabel("r (m)")
-    plt.ylabel("Temperature (K)")
-    plt.xlim(0.05, 1.45)
-    plt.ylim(300, 500)
-    plt.title(f"1D Temperature Distribution at t = {time_seconds/3600:.2f} h")
-    plt.grid(True)
-    plt.tight_layout()
+    T_flat = T_grid.flatten()  # (N,)
+    T_i = T_flat[:, np.newaxis]  # shape (N, 1)
+    T_j = T_flat[np.newaxis, :]  # shape (1, N)
+    T_avg = 0.5 * (T_i + T_j)  # shape (N, N)
 
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        fname = f"T_1D_{int(time_seconds)}s.png"
-        plt.savefig(os.path.join(save_dir, fname))
-        print(f"[plot] Saved 1D temperature plot to {os.path.join(save_dir, fname)}")
-    else:
-        plt.show()
+    # Zero out values outside horizon
+    T_avg[~horizon_mask] = 0.0
+    T_prev_avg[~horizon_mask] = 0.0
+    T_delta = T_avg - T_prev_avg
 
-    plt.close()
+    return T_delta
 
+
+def compute_velocity_third_step(Vr_half, Vz_half, Ar_next, Az_next, dt):
+    """
+    Implements step 3 in Equation (14): update velocity to time step n+1 using next-step acceleration.
+
+    Parameters:
+        Vr_half, Vz_half: intermediate velocities at (n+1/2) in r and z directions
+        Ar_next, Az_next: next-step accelerations in r and z directions
+        dt: time step
+
+    Returns:
+        Vr_new, Vz_new: updated velocities at full step (n+1) in r and z directions
+    """
+    Vr_new = Vr_half + 0.5 * dt * Ar_next
+    Vz_new = Vz_half + 0.5 * dt * Az_next
+    return Vr_new, Vz_new
