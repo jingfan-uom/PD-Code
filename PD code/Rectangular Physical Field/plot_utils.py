@@ -134,6 +134,4 @@ def plot_displacement_field(Rmat, Zmat, Ur, Uz, title_prefix="Displacement", sav
 
     plt.tight_layout()
 
-    if save:
-        plt.savefig(f"{title_prefix}_field.png", dpi=300)
     plt.show()
