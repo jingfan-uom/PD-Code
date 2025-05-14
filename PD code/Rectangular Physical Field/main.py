@@ -162,7 +162,7 @@ bz[ghost_inds_top, :] = b_val[1]  # Should be negative (downward)
 # ------------------------
 # Simulation loop settings
 # ------------------------
-dt = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
+dt = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.8  # Time step in seconds
 total_time = 1000  # Total simulation time (e.g., 5 hours)
 nsteps = int(40)
 print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
@@ -181,6 +181,7 @@ for step in range(nsteps):
     Ar, Az = compute_accelerated_velocity(Ur, Uz)
     Ur, Uz, Vr_half, Vz_half = compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az)
     Vr, Vz, Ar, Az = compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt)
+
 
     if step % 10 == 0:
         print(f"Step {step}/{nsteps} completed")
