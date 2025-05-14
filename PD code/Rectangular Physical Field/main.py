@@ -162,7 +162,7 @@ bz[ghost_inds_top, :] = b_val[1]  # Should be negative (downward)
 # ------------------------
 # Simulation loop settings
 # ------------------------
-dt = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.8  # Time step in seconds
+dt = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
 total_time = 1000  # Total simulation time (e.g., 5 hours)
 nsteps = int(40)
 print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
