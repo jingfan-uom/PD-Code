@@ -69,7 +69,7 @@ def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_
     lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1)
 
     # Convert to diagonal matrix
-    lambda_diag_matrix = np.diag(lambda_scalar)
+    lambda_diag_matrix = np.diag(lambda_scalar) * 1/2
 
     return lambda_diag_matrix
 
@@ -124,6 +124,8 @@ def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag
     denominator = (U.T @ U)
 
     if denominator <= 0:
+        cn = 0.0
+    elif numerator / denominator < 0:
         cn = 0.0
     else:
         cn = 2 * np.sqrt(numerator / denominator)
