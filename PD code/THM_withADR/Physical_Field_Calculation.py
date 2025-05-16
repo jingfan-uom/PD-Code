@@ -98,19 +98,36 @@ def compute_delta_temperature(T_grid, horizon_mask, T_prev_avg):
     return T_delta
 
 
-def compute_velocity_third_step(Vr_half, Vz_half, Ar_next, Az_next, dt):
-    """
-    Implements step 3 in Equation (14): update velocity to time step n+1 using next-step acceleration.
+"""explicit differential scheme:
 
-    Parameters:
-        Vr_half, Vz_half: intermediate velocities at (n+1/2) in r and z directions
-        Ar_next, Az_next: next-step accelerations in r and z directions
-        dt: time step
 
-    Returns:
-        Vr_new, Vz_new: updated velocities at full step (n+1) in r and z directions
+def compute_accelerated_velocity(Ur_curr, Uz_curr):
     """
+    Use three functions in Physical_Field_Calculation to calculate total displacement field.
+    """
+    Ur_new = Ur_curr
+    Uz_new = Uz_curr
+
+    Relative_elongation = pfc.compute_s_matrix(Rmat, Zmat, Ur_new, Uz_new, horizon_mask)
+
+    Ar_new = dir_r * c * (Relative_elongation) * partial_area_matrix / rho_s
+    Az_new = dir_z * c * (Relative_elongation) * partial_area_matrix / rho_s
+
+    Ar_new = np.sum(Ar_new, axis=1).reshape(Ur_curr.shape)  # Shape matches Ur_curr
+    Az_new = np.sum(Az_new, axis=1).reshape(Uz_curr.shape) + bz / rho_s
+
+    return Ar_new, Az_new  # Or return other desired quantities
+
+def compute_next_displacement_field(Ur_curr, Uz_curr, Vr_curr, Vz_curr, Ar_new, Az_new):
+    Vr_half = Vr_curr + 0.5 * dt * Ar_new
+    Vz_half = Vz_curr + 0.5 * dt * Az_new
+    Ur_next = Ur_curr + dt * Vr_half
+    Uz_next = Uz_curr + dt * Vz_half
+    return Ur_next, Uz_next, Vr_half, Vz_half
+
+def compute_next_velocity_third_step(Vr_half, Vz_half, Ur_next, Uz_next, dt):
+    Ar_next, Az_next = compute_accelerated_velocity(Ur_next, Uz_next)
     Vr_new = Vr_half + 0.5 * dt * Ar_next
     Vz_new = Vz_half + 0.5 * dt * Az_next
-    return Vr_new, Vz_new
-
+    return Vr_new, Vz_new, Ar_next, Az_next
+    """
