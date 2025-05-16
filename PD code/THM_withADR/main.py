@@ -22,7 +22,7 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 4, 4         # Number of cells in r and z directions
+Nr, Nz = 10, 10         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
 E = 10e9                  # Elastic modulus [Pa]
@@ -95,14 +95,18 @@ partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
     r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance
 )
 horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
+true_indices = np.where(horizon_mask)
 
 # ------------------------
-# Temperature update function
+# Preprocessing: shape factors, area weights, correction factors
 # ------------------------
+shape_factor_matrix = cf.compute_shape_factor_matrix(Rmat, true_indices)
+threshold_distance = np.sqrt(2) * dr
+factor_mat = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)  # Local adjustment factor
 
 
 # ------------------------
-# Initialize displacement, velocity, and acceleration fields
+# Initialize displacement, velocity, and acceleration fields, T
 # ------------------------
 Ur = np.zeros_like(Rmat)  # Radial displacement
 Uz = np.zeros_like(Rmat)  # Axial displacement
@@ -115,25 +119,35 @@ Az = np.zeros_like(Rmat)  # Axial acceleration
 
 dir_r, dir_z = pfc.compute_direction_matrix(Rmat, Zmat, Ur, Uz, horizon_mask)
 
+T = np.full(Rmat.shape, 273.15)  # Initial temperature field (uniform 200 K)
+
 # Get ghost node indices from bc_funcs
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_bottom, interior_inds_bottom = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_left, interior_inds_left = bc_funcs.get_left_ghost_indices(r_all, ghost_nodes_x)
 ghost_inds_right, interior_inds_right = bc_funcs.get_right_ghost_indices(r_all, ghost_nodes_x)
 
-
+# Apply initial boundary conditions
+T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top, interior_inds_top, 300.15, axis=0 , z_mask=None, r_mask=None)
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis=0)
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_right, interior_inds_right, axis=1)
+T_flat = T.flatten()
+T_prev_avg = T_flat[:, np.newaxis] - T_flat[np.newaxis, :]
+Tavg = pfc.compute_delta_temperature(T, horizon_mask, T_prev_avg)
 # core function of thermal and mechanical
-def compute_accelerated_velocity(Ur_curr, Uz_curr,Rmat, Zmat,horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix , rho,bz):
+def compute_accelerated_velocity(Ur_curr, Uz_curr,Rmat, Zmat,horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho ,bz , T_curr, T_prev_avg):
     """
     Use three functions in Physical_Field_Calculation to calculate total displacement field.
     """
     Ur_new = Ur_curr
     Uz_new = Uz_curr
 
+    Tavg = pfc.compute_delta_temperature(T_curr, horizon_mask, T_prev_avg)
     Relative_elongation = pfc.compute_s_matrix(Rmat, Zmat, Ur_new, Uz_new, horizon_mask)
 
-    Ar_new = dir_r * c * (Relative_elongation) * partial_area_matrix / rho
-    Az_new = dir_z * c * (Relative_elongation) * partial_area_matrix / rho
+    Ar_new = dir_r * c * (Relative_elongation - alpha * Tavg) * partial_area_matrix / rho
+    Az_new = dir_z * c * (Relative_elongation - alpha * Tavg) * partial_area_matrix / rho
 
     Ar_new = np.sum(Ar_new, axis=1).reshape(Ur_curr.shape)  # Shape matches Ur_curr
     Az_new = np.sum(Az_new, axis=1).reshape(Uz_curr.shape) + bz / rho
@@ -142,6 +156,29 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,Rmat, Zmat,horizon_mask,dir_r 
 
 
     return Ar_new, Az_new  # Or return other desired quantities
+
+# Temperature update function
+
+def update_temperature(Tcurr, Hcurr, Kcurr):
+    flux = Kcurr @ Tcurr.flatten()               # Apply nonlocal heat flux
+    flux = flux.reshape(Nz_tot, Nr_tot)         # Reshape to 2D
+    flux[(flux > -tolerance) & (flux < tolerance)] = 0  # Eliminate small fluctuations
+
+    Hnew = Hcurr + flux                          # Update enthalpy
+    Tnew = cf.get_temperature(Hnew, rho_s, cs, cl, L, Ts, Tl)   # Convert to temperature
+
+    # Apply boundary conditions
+    Tnew = bc_funcs.apply_bc_dirichlet_mirror(Tnew, ghost_inds_top, interior_inds_top, 300.15, axis=0 , z_mask=None, r_mask=None)
+    Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_bottom, interior_inds_bottom, axis=0)
+    Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_left, interior_inds_left, axis=1)
+    Tnew = bc_funcs.apply_bc_zero_flux(Tnew, ghost_inds_right, interior_inds_right, axis=1)
+
+    Knew = cf.build_K_matrix(Tnew , cf.compute_thermal_conductivity_matrix, factor_mat,
+                             partial_area_matrix, shape_factor_matrix,
+                             distance_matrix, horizon_mask, true_indices, r_flat,
+                             ks, kl, Ts, Tl, delta, dz, dt_th)
+
+    return Tnew, Hnew, Knew
 
 
 
@@ -159,7 +196,7 @@ dt_m = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in secon
 dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta)
 if dt_th > 5:
     dt_th =5
-Ar, Az = compute_accelerated_velocity(Ur, Uz,Rmat, Zmat,horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix , rho_s,bz)
+Ar, Az = compute_accelerated_velocity(Ur, Uz,Rmat, Zmat,horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho_s ,bz ,T, T_prev_avg)
 
 Fr_0 = Ar * rho_s
 Fz_0 = Az * rho_s
@@ -167,15 +204,22 @@ lambda_diag_matrix = ADR.compute_lambda_diag_matrix(partial_area_matrix, distanc
 Vr_half = ADR.adr_initial_velocity(Fr_0, dt_m, lambda_diag_matrix)
 Vz_half = ADR.adr_initial_velocity(Fz_0, dt_m, lambda_diag_matrix)
 
+H = cf.get_enthalpy(T, rho_s, cs, cl, L, Ts, Tl)  # Initial enthalpy
+Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
+                         partial_area_matrix, shape_factor_matrix,
+                         distance_matrix, horizon_mask, true_indices, r_flat,
+                         ks, kl, Ts, Tl, delta, dz, dt_th)
+
 
 # ------------------------
 # Simulation loop settings
 # ------------------------
 
 total_time = 1000  # Total simulation time (e.g., 5 hours)
-nsteps = int(10)
+nsteps_th = int(100)
+nsteps_m = int(1000)
 print_interval = int(10 / dt_m)  # Print progress every 10 simulated seconds
-print(f"Total steps: {nsteps}")
+
 start_time = time.time()
 
 
@@ -186,18 +230,60 @@ save_times = [2, 4, 6, 8, 10]  # Save snapshots (in hours)
 save_steps = [int(t * 3600 / dt_m) for t in save_times]
 T_record = []  # Store temperature snapshots
 
-for step in range(nsteps):
-    Ar, Az = compute_accelerated_velocity(Ur, Uz, Rmat, Zmat, horizon_mask, dir_r, dir_z, c, partial_area_matrix,
-                                              rho_s, bz)
+for step in range(nsteps_th):
 
-    Fr = Ar * rho_s
-    Fz = Az * rho_s
-    cr_n = ADR.compute_local_damping_coefficient(Fr, Fr_0, Vr_half, lambda_diag_matrix, Ur, 1)
-    cz_n = ADR.compute_local_damping_coefficient(Fz, Fz_0, Vz_half, lambda_diag_matrix, Uz, 1)
-    Fr_0 = Fr
-    Fz_0 = Fz
-    Vr_half, Ur = ADR.adr_update_velocity_displacement(Ur, Vr_half, Fr, cr_n, lambda_diag_matrix, 1)
-    Vz_half, Uz = ADR.adr_update_velocity_displacement(Uz, Vz_half, Fz, cz_n, lambda_diag_matrix, 1)
+    T_prev = Tavg
+    T, H, Kmat = update_temperature(T, H, Kmat)
+    Tavg = pfc.compute_delta_temperature(T, horizon_mask, T_prev_avg)
+    T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top, interior_inds_top, 300.15, axis=0, z_mask=None,
+                                              r_mask=None)
+    T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis=0)
+    T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
+    T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_right, interior_inds_right, axis=1)
+
+    if step % 10 == 0:
+        print(f"[Temperature Step {step + 1}/{nsteps_th}]")
+
+    for step in range(nsteps_m):
+        previous_Ur = Ur
+        previous_Uz = Uz
+        Ar, Az = compute_accelerated_velocity(Ur, Uz, Rmat, Zmat, horizon_mask, dir_r, dir_z, c, partial_area_matrix,
+                                              rho_s,bz ,T , T_prev_avg)
+
+        Fr = Ar * rho_s
+        Fz = Az * rho_s
+        cr_n = ADR.compute_local_damping_coefficient(Fr, Fr_0, Vr_half, lambda_diag_matrix, Ur, 1)
+        cz_n = ADR.compute_local_damping_coefficient(Fz, Fz_0, Vz_half, lambda_diag_matrix, Uz, 1)
+        Fr_0 = Fr
+        Fz_0 = Fz
+        Vr_half, Ur = ADR.adr_update_velocity_displacement(Ur, Vr_half, Fr, cr_n, lambda_diag_matrix, 1)
+        Vz_half, Uz = ADR.adr_update_velocity_displacement(Uz, Vz_half, Fz, cz_n, lambda_diag_matrix, 1)
+
+        Ur[ghost_inds_bottom, :] = 0.0000
+        Uz[ghost_inds_bottom, :] = 0.0000
+        Uz[ghost_inds_top, :] = 0.0001
+        Ur[:, ghost_inds_left] = 0.0000
+        Ur[:, ghost_inds_right] = 0.0000
+        Uz[:, ghost_inds_left] = 0.0000
+        Uz[:, ghost_inds_right] = 0.0000
+
+        # Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
+        # Vr, Vz, Ar, Az = pfc.compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt_m)
+        # Uz[ghost_inds_bottom, :] = 0
+        # Ur[:, ghost_inds_left] = 0
+        # Ur[:, ghost_inds_right] = 0
+        # 计算当前位移增量的RMS
+        delta_Ur = Ur - previous_Ur
+        delta_Uz = Uz - previous_Uz
+
+        rms_increment = np.sqrt(np.mean(delta_Ur ** 2 + delta_Uz ** 2))
+
+        if rms_increment < 1e-11:
+            print(f"Convergence reached at step {step} with RMS displacement increment {rms_increment}")
+
+            break
+        if step % 10 == 0:
+            print(f"Step_m {step} completed")
 
     #Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
     # Vr, Vz, Ar, Az = pfc.compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt_m)
@@ -206,7 +292,7 @@ for step in range(nsteps):
     # Ur[:, ghost_inds_right] = 0
 
     if step % 10 == 0:
-        print(f"Step {step}/{nsteps} completed")
+        print(f"Step {step}/{nsteps_m} completed")
 
 end_time = time.time()
 print(f"Calculation finished, elapsed real time = {end_time - start_time:.2f}s")
@@ -216,8 +302,15 @@ time = end_time - start_time
 # ------------------------
 # Post-processing: visualization
 # ------------------------
-plot.plot_displacement_field(Rmat, Zmat, Ur, Uz, title_prefix="Final Displacement", save=True)
+mask = np.ones(Ur.shape, dtype=bool)
 
+# 将 ghost 点置为 False
+mask[ghost_inds_top, :] = False
+mask[ghost_inds_bottom, :] = False
+mask[:, ghost_inds_left] = False
+mask[:, ghost_inds_right] = False
+plot.plot_displacement_field(Rmat, Zmat, Ur, Uz,mask, title_prefix="Final Displacement", save=False)
+plot.temperature(Rmat, Zmat, T, total_time, nsteps_th, dr,dz,time)
 # Optional: 1D profile plots
 """
 for i, T_snap in enumerate(T_record):
