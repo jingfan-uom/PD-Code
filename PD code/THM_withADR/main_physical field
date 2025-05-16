@@ -22,7 +22,7 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 40         # Number of cells in r and z directions
+Nr, Nz = 60, 60         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
 E = 10e6                  # Elastic modulus [Pa]
