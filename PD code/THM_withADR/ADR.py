@@ -69,7 +69,7 @@ def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_
     lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1)
 
     # Convert to diagonal matrix
-    lambda_diag_matrix = np.diag(lambda_scalar) * 1/2
+    lambda_diag_matrix = np.diag(lambda_scalar) * 1/4
 
     return lambda_diag_matrix
 
