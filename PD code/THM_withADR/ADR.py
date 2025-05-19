@@ -59,11 +59,10 @@ def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_
     """
 
     # Ensure distance is safe to divide
-    distance_safe = np.where(distance_matrix > 1e-12, distance_matrix, 1e-12)
 
     # Compute contrib_matrix only where mask is True
     contrib_matrix = np.zeros_like(distance_matrix)
-    contrib_matrix[horizon_mask] = (c * partial_area_matrix[horizon_mask]) / distance_safe[horizon_mask]
+    contrib_matrix[horizon_mask] = (c * partial_area_matrix[horizon_mask]) / distance_matrix[horizon_mask]
 
     # Sum row-wise to get K_scalar (only for valid rows)
     lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1)
@@ -102,11 +101,11 @@ def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag
     """
 
     # Flatten all arrays
-    F_curr_flat = F_curr.reshape(-1,1)
-    F_prev_flat = F_prev.reshape(-1,1)
-    vel_half_flat = velocity_half.reshape(-1,1)
-    K_diag_flat = np.diag(lambda_diag_matrix).reshape(-1,1)
-    U = U.reshape(-1, 1)  # shape: (N, 1)
+    F_curr_flat = F_curr.reshape(-1)
+    F_prev_flat = F_prev.reshape(-1)
+    vel_half_flat = velocity_half.reshape(-1)
+    K_diag_flat = np.diag(lambda_diag_matrix).reshape(-1)
+    U = U.reshape(-1)  # shape: (N, 1)
 
     # Initialize output
     Kn_local_flat = np.zeros_like(F_curr_flat)
@@ -116,12 +115,12 @@ def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag
 
     delta_force = (F_curr_flat - F_prev_flat) / K_diag_flat
     Kn_local_flat[nonzero_mask] = -delta_force[nonzero_mask] / (dt * vel_half_flat[nonzero_mask])
-    Kn_local_matrix = np.diag(Kn_local_flat.flatten())
+
 
     # velocity == 0 → Kn_local remains 0
 
-    numerator = (U.T @ Kn_local_matrix @ U)
-    denominator = (U.T @ U)
+    numerator = np.dot(U, Kn_local_flat * U)
+    denominator = np.dot(U, U)
 
     if denominator <= 0:
         cn = 0.0
