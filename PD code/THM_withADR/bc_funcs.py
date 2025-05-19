@@ -91,6 +91,38 @@ def apply_bc_dirichlet_mirror(Tarr, ghost_inds, interior_inds, T_bc,
     return Tarr
 
 
+def apply_bc_dirichlet_mirror_disp(Uarr, ghost_inds, interior_inds, U_bc, axis, z_mask=None, r_mask=None):
+    """
+    Apply Dirichlet mirror boundary condition for displacement field:
+    U_ghost = 2 * U_bc - U_interior
+
+    Parameters: （略，和温度函数类似）
+
+    Returns:
+        Uarr : np.ndarray
+            Displacement array after applying the boundary condition
+    """
+    if Uarr.ndim == 1:
+        Uarr[ghost_inds] = 2.0 * U_bc - Uarr[interior_inds]
+        return Uarr
+
+    if axis == 0:
+        if r_mask is None:
+            Uarr[ghost_inds, :] = 2.0 * U_bc - Uarr[interior_inds, :]
+        else:
+            col_inds = np.where(r_mask)[0]
+            Uarr[ghost_inds[:, None], col_inds[None, :]] = (
+                2.0 * U_bc - Uarr[interior_inds[:, None], col_inds[None, :]]
+            )
+    else:
+        if z_mask is None:
+            Uarr[:, ghost_inds] = 2.0 * U_bc - Uarr[:, interior_inds]
+        else:
+            row_inds = np.where(z_mask)[0]
+            Uarr[row_inds[:, None], ghost_inds[None, :]] = (
+                2.0 * U_bc - Uarr[row_inds[:, None], interior_inds[None, :]]
+            )
+    return Uarr
 
 
 
