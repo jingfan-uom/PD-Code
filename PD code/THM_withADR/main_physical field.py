@@ -150,10 +150,7 @@ bz = np.zeros_like(Rmat)
 
 # Pressure value
 pressure = 0  # Pa, downward pressure
-# Normal direction (top boundary pointing downward)
-n = np.array([0.0, 1.0])  # 0: radial component, 1: downward in z
-b_val = -(pressure / delta) * n  # Body force density vector [N/m³]
-bz[ghost_inds_top, :] = b_val[1]  # Should be negative (downward)
+bz[ghost_inds_top, :] = pressure
 Uz[ghost_inds_top, :] = 0.0001
 
 
