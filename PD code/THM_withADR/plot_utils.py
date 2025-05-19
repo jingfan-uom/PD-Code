@@ -2,27 +2,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MultipleLocator
 
-def temperature(R_all, Z_all, T, total_time, nsteps,dr,dz,time):
-    T_min = np.min(T)
-    T_max = np.max(T)
+def temperature(R_all, Z_all, T, total_time, nsteps, dr, dz, time, mask):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    if mask is None:
+        mask = np.ones_like(T, dtype=bool)
+    # 只在非ghost点里找最大最小
+    valid_field = np.where(mask, T, np.nan)
+    T_min = np.nanmin(valid_field)
+    T_max = np.nanmax(valid_field)
 
     plt.figure(figsize=(6, 5))
-    levels = np.arange(270, 380, 5)  # 270, 275, 280, ..., 375
-
+    levels = np.arange(274, 275, 0.2)
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
     plt.xlim([0.0, 0.01])
     plt.ylim([0.0, 0.01])
     cbar = plt.colorbar(ctf)
+
     cbar.set_label(
         f"Temperature (K)\n"
         f"Computation time: {time:.1f} s\n"
         f"Δr = {dr:.4f}, Δz = {dz:.4f}\n"
-        f"Min: {T_min:.2f} K, Max: {T_max:.2f} K"
+        f"Min: {T_min:.2f} K\nMax: {T_max:.2f} K",
+        rotation=270, labelpad=30, va='bottom'
     )
+
     plt.xlabel("r (m)")
     plt.ylabel("z (m)")
     plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
+    plt.tight_layout()
     plt.show()
+
 
 def plot_z_profile(T_record, z_all, r_all, save_times_hours):
     """
@@ -101,39 +112,46 @@ def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
     plt.close()
 
 
-def plot_displacement_field(Rmat, Zmat, Ur, Uz, title_prefix="Displacement", save=False):
-    """
-    Plot displacement field: Ur, Uz, and |U|.
+import numpy as np
+import matplotlib.pyplot as plt
 
-    Parameters:
-    -----------
-    Rmat, Zmat : 2D arrays
-        Mesh grid of r and z coordinates.
-    Ur, Uz : 2D arrays
-        Displacement fields in r and z directions.
-    title_prefix : str
-        Title prefix for the plots.
-    save : bool
-        Whether to save the figure as a PNG file.
-    """
+
+def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask=None, title_prefix="Displacement", save=False, time=0, dr=0, dz=0):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
     U_mag = np.sqrt(Ur**2 + Uz**2)
+    if mask is None:
+        mask = np.ones_like(Ur, dtype=bool)
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     cmap = 'viridis'
+    fields = [Ur, Uz, U_mag]
+    titles = [f"{title_prefix} - Ur", f"{title_prefix} - Uz", f"{title_prefix} - |U|"]
 
-    for ax, field, title in zip(
-        axes, [Ur, Uz, U_mag], [f"{title_prefix} - Ur", f"{title_prefix} - Uz", f"{title_prefix} - |U|"]
-    ):
+    for ax, field, title in zip(axes, fields, titles):
         im = ax.contourf(Rmat, Zmat, field, cmap=cmap)
         ax.set_title(title)
-        ax.set_xlabel("x (m)")
+        ax.set_xlabel("r (m)")
         ax.set_ylabel("z (m)")
-        ax.set_xlim(0, 0.1)
-        ax.set_ylim(0, 0.1)
-        fig.colorbar(im, ax=ax)
+        ax.set_xlim(Rmat.min(), Rmat.max())
+        ax.set_ylim(Zmat.min(), Zmat.max())
+        cbar = fig.colorbar(im, ax=ax)
+
+        # 只在非ghost点里找最大最小
+        valid_field = np.where(mask, field, np.nan)
+        vmin, vmax = np.nanmin(valid_field), np.nanmax(valid_field)
+
+        # 竖排写到 colorbar label
+        cbar.set_label(
+            f"{title}\n"
+            f"Computation time: {time:.1f} s\n"
+            f"Min: {vmin:.2e}, Max: {vmax:.2e}"
+        )
 
     plt.tight_layout()
-
     if save:
         plt.savefig(f"{title_prefix}_field.png", dpi=300)
     plt.show()
+
+
