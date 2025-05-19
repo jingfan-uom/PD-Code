@@ -22,10 +22,10 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 60, 60         # Number of cells in r and z directions
+Nr, Nz = 40, 40         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
-E = 10e6                  # Elastic modulus [Pa]
+E = 1e9                  # Elastic modulus [Pa]
 nu = 0.25                # Poisson's ratio
 K = 1.0                  # Thermal conductivity [W/(m·K)]
 alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
@@ -149,15 +149,12 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,Rmat, Zmat,horizon_mask,dir_r 
 bz = np.zeros_like(Rmat)
 
 # Pressure value
-pressure = 0  # Pa, downward pressure
-bz[ghost_inds_top, :] = pressure
-Uz[ghost_inds_top, :] = 0.0001
-
+pressure = 1000e3/delta  # Pa, downward pressure
+bz[ghost_inds_top, :] = -pressure
 
 dt_m = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
 dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta)
-if dt_th > 5:
-    dt_th =5
+
 Ar, Az = compute_accelerated_velocity(Ur, Uz,Rmat, Zmat,horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix , rho_s,bz)
 
 Fr_0 = Ar * rho_s
@@ -200,13 +197,20 @@ for step in range(nsteps):
     Vr_half, Ur = ADR.adr_update_velocity_displacement(Ur, Vr_half, Fr, cr_n, lambda_diag_matrix, 1)
     Vz_half, Uz = ADR.adr_update_velocity_displacement(Uz, Vz_half, Fz, cz_n, lambda_diag_matrix, 1)
 
-    Ur[ghost_inds_bottom, :] = 0.0000
-    Uz[ghost_inds_bottom, :] = 0.0000
-    Uz[ghost_inds_top, :] = 0.0001
-    Ur[:, ghost_inds_left] = 0.0000
-    Ur[:, ghost_inds_right] = 0.0000
-    Uz[:, ghost_inds_left] = 0.0000
-    Uz[:, ghost_inds_right] = 0.0000
+    # bottom 边界（z方向下边，axis=0）
+    Ur = bc_funcs.apply_bc_dirichlet_mirror_disp(Ur, ghost_inds_bottom, interior_inds_bottom, 0.0, axis=0)
+    Uz = bc_funcs.apply_bc_dirichlet_mirror_disp(Uz, ghost_inds_bottom, interior_inds_bottom, 0.0, axis=0)
+
+
+
+    # left 边界（r方向左边，axis=1）
+    Ur = bc_funcs.apply_bc_dirichlet_mirror_disp(Ur, ghost_inds_left, interior_inds_left, 0.0, axis=1)
+    Uz = bc_funcs.apply_bc_dirichlet_mirror_disp(Uz, ghost_inds_left, interior_inds_left, 0.0, axis=1)
+
+    # right 边界（r方向右边，axis=1）
+    Ur = bc_funcs.apply_bc_dirichlet_mirror_disp(Ur, ghost_inds_right, interior_inds_right, 0.0, axis=1)
+    Uz = bc_funcs.apply_bc_dirichlet_mirror_disp(Uz, ghost_inds_right, interior_inds_right, 0.0, axis=1)
+    dir_r, dir_z = pfc.compute_direction_matrix(Rmat, Zmat, Ur, Uz, horizon_mask)
 
     #Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
     # Vr, Vz, Ar, Az = pfc.compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt_m)
