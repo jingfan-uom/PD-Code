@@ -71,63 +71,44 @@ def compute_s_matrix(X, Y, Ux, Uz, horizon_mask):
     return s_matrix
 
 
-def compute_delta_temperature(T_grid, horizon_mask, T_prev_avg):
+def compute_delta_temperature(T_grid,  Tpre_avg):
     """
     Compute the average temperature matrix T_avg (N, N), and optionally return the delta
     compared to the previous time step average temperature.
 
     Parameters:
         T_grid: 2D temperature field array (Ny, Nx)
-        horizon_mask: boolean array of shape (N, N)
+
         T_prev_avg: previous time step average temperature matrix, shape (N, N)
 
     Returns:
         T_delta: difference between current and previous average temperature matrices
     """
 
-    T_flat = T_grid.flatten()  # (N,)
-    T_i = T_flat[:, np.newaxis]  # shape (N, 1)
-    T_j = T_flat[np.newaxis, :]  # shape (1, N)
-    T_avg = 0.5 * (T_i + T_j)  # shape (N, N)
+    Tcurr_flat = T_grid.flatten()  # (N,)
+    T_i = Tcurr_flat [:, np.newaxis]  # shape (N, 1)
+    T_j = Tcurr_flat [np.newaxis, :]  # shape (1, N)
+    Tcurr_avg = 0.5 * (T_i + T_j)  # shape (N, N)
 
-    # Zero out values outside horizon
-    T_avg[~horizon_mask] = 0.0
-    T_prev_avg[~horizon_mask] = 0.0
-    T_delta = T_avg - T_prev_avg
+
+    T_delta = Tcurr_avg - Tpre_avg
 
     return T_delta
 
 
-"""explicit differential scheme:
-
-
-def compute_accelerated_velocity(Ur_curr, Uz_curr):
+def compute_velocity_third_step(Vr_half, Vz_half, Ar_next, Az_next, dt):
     """
-    Use three functions in Physical_Field_Calculation to calculate total displacement field.
+    Implements step 3 in Equation (14): update velocity to time step n+1 using next-step acceleration.
+
+    Parameters:
+        Vr_half, Vz_half: intermediate velocities at (n+1/2) in r and z directions
+        Ar_next, Az_next: next-step accelerations in r and z directions
+        dt: time step
+
+    Returns:
+        Vr_new, Vz_new: updated velocities at full step (n+1) in r and z directions
     """
-    Ur_new = Ur_curr
-    Uz_new = Uz_curr
-
-    Relative_elongation = pfc.compute_s_matrix(Rmat, Zmat, Ur_new, Uz_new, horizon_mask)
-
-    Ar_new = dir_r * c * (Relative_elongation) * partial_area_matrix / rho_s
-    Az_new = dir_z * c * (Relative_elongation) * partial_area_matrix / rho_s
-
-    Ar_new = np.sum(Ar_new, axis=1).reshape(Ur_curr.shape)  # Shape matches Ur_curr
-    Az_new = np.sum(Az_new, axis=1).reshape(Uz_curr.shape) + bz / rho_s
-
-    return Ar_new, Az_new  # Or return other desired quantities
-
-def compute_next_displacement_field(Ur_curr, Uz_curr, Vr_curr, Vz_curr, Ar_new, Az_new):
-    Vr_half = Vr_curr + 0.5 * dt * Ar_new
-    Vz_half = Vz_curr + 0.5 * dt * Az_new
-    Ur_next = Ur_curr + dt * Vr_half
-    Uz_next = Uz_curr + dt * Vz_half
-    return Ur_next, Uz_next, Vr_half, Vz_half
-
-def compute_next_velocity_third_step(Vr_half, Vz_half, Ur_next, Uz_next, dt):
-    Ar_next, Az_next = compute_accelerated_velocity(Ur_next, Uz_next)
     Vr_new = Vr_half + 0.5 * dt * Ar_next
     Vz_new = Vz_half + 0.5 * dt * Az_next
-    return Vr_new, Vz_new, Ar_next, Az_next
-    """
+    return Vr_new, Vz_new
+
