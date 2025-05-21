@@ -18,16 +18,11 @@ def adr_initial_velocity(F0, dt, lambda_diag_matrix):
     Returns
     -------
     U_dot_half : ndarray
-        Initial half-step velocity, shape same as F0 (i.e. N x N)
+        Initial half-step velocity
     """
-    original_shape = F0.shape           # e.g. (N, N)
-    F0_flat = F0.reshape(-1)            # → (N*N,)
-    lambda_flat = np.diag(lambda_diag_matrix)  # → (N*N,)
 
-    V_half_flat = (dt / 2) * (F0_flat / lambda_flat)
+    V_half = (dt / 2) * (F0 / lambda_diag_matrix)
 
-    # Reshape back to original 2D shape
-    V_half = V_half_flat.reshape(original_shape)
 
     return V_half
 
@@ -65,12 +60,9 @@ def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_
     contrib_matrix[horizon_mask] = (c * partial_area_matrix[horizon_mask]) / distance_matrix[horizon_mask]
 
     # Sum row-wise to get K_scalar (only for valid rows)
-    lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1)
+    lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1) * 1/4
 
-    # Convert to diagonal matrix
-    lambda_diag_matrix = np.diag(lambda_scalar) * 1/4
-
-    return lambda_diag_matrix
+    return lambda_scalar
 
 
 def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag_matrix, U, dt):
@@ -79,52 +71,38 @@ def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag
 
     Parameters
     ----------
-    F_curr : ndarray (n_nodes, n_dim)
-        Current total force at time n
+    F_curr :  Current total force at time n
 
-    F_prev : ndarray (n_nodes, n_dim)
-        Previous total force at time n-1 (or zeros if n == 0)
+    F_prev : Previous total force at time n-1 (or zeros if n == 0)
 
-    velocity_half : ndarray (n_nodes, n_dim)
-        Velocity at time n-1/2
+    velocity_half : Velocity at time n-1/2
 
-    K_diag : ndarray (n_nodes, n_dim)
-        Artificial density matrix diagonal (Λ)
+    K_diag : Artificial density matrix diagonal (Λ)
 
     dt : float
         Time step size
 
     Returns
     -------
-    Kn_local_flat : ndarray (n_nodes * n_dim,)
-        Flattened local stiffness values
+    Kn_local :   local stiffness values
     """
 
-    # Flatten all arrays
-    F_curr_flat = F_curr.reshape(-1)
-    F_prev_flat = F_prev.reshape(-1)
-    vel_half_flat = velocity_half.reshape(-1)
-    K_diag_flat = np.diag(lambda_diag_matrix).reshape(-1)
-    U = U.reshape(-1)  # shape: (N, 1)
-
     # Initialize output
-    Kn_local_flat = np.zeros_like(F_curr_flat)
+    Kn_local = np.zeros_like(F_curr)
 
     # Only compute where velocity ≠ 0
-    nonzero_mask = vel_half_flat != 0.0
+    nonzero_mask = velocity_half != 0.0
 
-    delta_force = (F_curr_flat - F_prev_flat) / K_diag_flat
-    Kn_local_flat[nonzero_mask] = -delta_force[nonzero_mask] / (dt * vel_half_flat[nonzero_mask])
+    delta_force = (F_curr - F_prev) / lambda_diag_matrix
+    Kn_local[nonzero_mask] = -delta_force[nonzero_mask] / (dt * velocity_half[nonzero_mask])
 
 
     # velocity == 0 → Kn_local remains 0
 
-    numerator = np.dot(U, Kn_local_flat * U)
+    numerator = np.dot(U, Kn_local * U)
     denominator = np.dot(U, U)
 
-    if denominator <= 0:
-        cn = 0.0
-    elif numerator / denominator < 0:
+    if denominator <= 0 or numerator / denominator < 0:
         cn = 0.0
     else:
         cn = 2 * np.sqrt(numerator / denominator)
@@ -138,20 +116,14 @@ def adr_update_velocity_displacement(U_prev, V_dot_half_prev, F_curr, c_n, D_dia
 
     Parameters
     ----------
-    u_prev : ndarray
-        Previous displacement (2D array, e.g. (n_nodes, n_dim))
+    u_prev : Previous displacement
+    u_dot_half_prev : Previous half-step velocity (same shape as u_prev)
 
-    u_dot_half_prev : ndarray
-        Previous half-step velocity (same shape as u_prev)
+    F_curr :Current force (same shape as u_prev)
 
-    F_curr : ndarray
-        Current force (same shape as u_prev)
+    c_n : Adaptive damping coefficient at time n
 
-    c_n : float
-        Adaptive damping coefficient at time n
-
-    D_diag : ndarray
-        Diagonal of artificial density matrix (same shape as u_prev)
+    D_diag :  Diagonal of artificial density matrix
 
     dt : float
         Time step size
@@ -165,23 +137,15 @@ def adr_update_velocity_displacement(U_prev, V_dot_half_prev, F_curr, c_n, D_dia
         Updated displacement, same shape as u_prev
     """
     # Flatten everything
-    U_flat = U_prev.reshape(-1)
-    V_dot_half_flat = V_dot_half_prev.reshape(-1)
-    F_flat = F_curr.reshape(-1)
-    D_vector = np.diag(D_diag)
 
 
     # Compute updated half-step velocity
-    numerator = (2 - c_n * dt) * V_dot_half_flat + 2 * dt * (F_flat / D_vector)
+    numerator = (2 - c_n * dt) * V_dot_half_prev + 2 * dt * (F_curr / D_diag)
     denominator = 2 + c_n * dt
-    V_dot_half_flat = numerator / denominator
+    V_dot_half = numerator / denominator
 
     # Update displacement
-    U_next_flat = U_flat + dt * V_dot_half_flat
-
-    # Reshape back to original shape
-    V_dot_half = V_dot_half_flat.reshape(U_prev.shape)
-    U_next = U_next_flat.reshape(U_prev.shape)
+    U_next = U_prev + dt * V_dot_half
 
     return V_dot_half, U_next
 
