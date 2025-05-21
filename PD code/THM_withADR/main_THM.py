@@ -22,7 +22,7 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.01, 0.01        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 20         # Number of cells in r and z directions
+Nr, Nz = 10, 10         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
 E = 25.7e9                  # Elastic modulus [Pa]
@@ -94,6 +94,7 @@ else:
 partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
     r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance
 )
+
 horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
 true_indices = np.where(horizon_mask)
 
@@ -120,11 +121,7 @@ Az = np.zeros_like(Rmat).flatten()  # Axial acceleration (1D)
 dir_r, dir_z = pfc.compute_direction_matrix(r_flat, z_flat, Ur, Uz, horizon_mask)
 
 T = np.full(Rmat.shape, 283.15)  # Initial temperature field (uniform 200 K)
-T_prev = T
-Tpre_flat = T_prev.flatten()  # (N,)
-T_i = Tpre_flat[:, np.newaxis]  # shape (N, 1)
-T_j = Tpre_flat[np.newaxis, :]  # shape (1, N)
-Tpre_avg = 0.5 * (T_i + T_j)  # shape (N, N)
+Tpre_avg = 283.15
 # Get ghost node indices from bc_funcs
 ghost_inds_top, interior_inds_top = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z)
 ghost_inds_bottom, interior_inds_bottom = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z)
@@ -137,28 +134,23 @@ ghost_inds_top_1d = [i * Nz_tot + j for i in range(ghost_nodes_z) for j in range
 ghost_inds_bottom_1d = [i * Nz_tot + j for i in range(Nr_tot - ghost_nodes_z, Nr_tot) for j in range(Nz_tot)]
 
 
-# Apply initial boundary conditions
-bz = np.zeros_like(Rmat)
-# Pressure value
-bz[ghost_inds_top, :] = -0 # Should be negative (downward)
-bz = bz.flatten()
+
+
 # Apply initial conditions
+
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis=0)
+T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right, interior_inds_right, 274.15, axis=1, z_mask=None, r_mask=None)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top, interior_inds_top, 274.15, axis=0, z_mask=None, r_mask=None)
-
-mask = np.ones(T.shape, dtype=bool)
-# 将 ghost 点置为 False
-mask[ghost_inds_top, :] = False
-mask[ghost_inds_bottom, :] = False
-mask[:, ghost_inds_left] = False
-mask[:, ghost_inds_right] = False
-
-T[~mask] = 274.15
-
-
+valid_mask = np.ones(Rmat.shape, dtype=bool)
+valid_mask[:ghost_nodes_z, :ghost_nodes_x] = False  # 左上角
+valid_mask[:ghost_nodes_z, -ghost_nodes_x:] = False# 右上角
+#valid_mask[-ghost_nodes_z:, :ghost_nodes_x] = False # 左下角
+#valid_mask[-ghost_nodes_z:, -ghost_nodes_x:] = False # 右下角
+T[~valid_mask] = 265.15
 
 # core function of thermal and mechanical
-def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho ,bz , T_curr,Tpre_avg):
+def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho , T_curr,Tpre_avg):
     """
     Use three functions in Physical_Field_Calculation to calculate total displacement field.
     """
@@ -172,7 +164,7 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,d
     Az_new = dir_z * c * (Relative_elongation - alpha * Tavg) * partial_area_matrix / rho
 
     Ar_new = np.sum(Ar_new, axis=1)  # Shape matches Ur_curr
-    Az_new = np.sum(Az_new, axis=1) + bz / rho
+    Az_new = np.sum(Az_new, axis=1)
     # Set acceleration to zero at top ghost region
 
     return Ar_new, Az_new  # Or return other desired quantities
@@ -196,9 +188,9 @@ def update_temperature(Tcurr, Hcurr, Kcurr):
 
 # time_step calculation
 dt_m = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.5  # Time step in seconds
-dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta) * 0.1
+dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta) * 0.4
 
-Ar, Az = compute_accelerated_velocity(Ur, Uz, r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho_s ,bz ,T, Tpre_avg)
+Ar, Az = compute_accelerated_velocity(Ur, Uz, r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho_s ,T, Tpre_avg)
 
 Fr_0 = Ar * rho_s
 Fz_0 = Az * rho_s
@@ -217,11 +209,10 @@ Kmat = cf.build_K_matrix(T, cf.compute_thermal_conductivity_matrix, factor_mat,
 # Simulation loop settings
 # ------------------------
 
-total_time = 10  # Total simulation time (e.g., 5 hours)
+total_time = 200  # Total simulation time (e.g., 5 hours)
 nsteps_th = int(total_time/dt_th)
 nsteps_m = int(1000)
 print_interval = int(total_time / dt_m)  # Print progress every 10 simulated seconds
-
 start_time = time.time()
 
 
@@ -250,7 +241,7 @@ for step in range(nsteps_th):
         previous_Ur = Ur
         previous_Uz = Uz
         Ar, Az = compute_accelerated_velocity(Ur, Uz, r_flat, z_flat, horizon_mask, dir_r, dir_z, c, partial_area_matrix,
-                                              rho_s, bz, T, Tpre_avg)
+                                              rho_s, T, Tpre_avg)
 
         Fr = Ar * rho_s
         Fz = Az * rho_s
@@ -282,6 +273,7 @@ for step in range(nsteps_th):
         if step % 10 == 0:
             print(f"Step_m {step} completed")
 
+
     #Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
     # Vr, Vz, Ar, Az = pfc.compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt_m)
     #Uz[ghost_inds_bottom, :] = 0
@@ -299,6 +291,12 @@ time = end_time - start_time
 # ------------------------
 # Post-processing: visualization
 # ------------------------
+mask = np.ones(T.shape, dtype=bool)
+# 将 ghost 点置为 False
+mask[ghost_inds_top, :] = False
+mask[ghost_inds_bottom, :] = False
+mask[:, ghost_inds_left] = False
+mask[:, ghost_inds_right] = False
 Ur = Ur.reshape(Rmat.shape)
 Uz = Uz.reshape(Zmat.shape)
 plot.plot_displacement_field(Rmat, Zmat, Ur, Uz,mask, title_prefix="Displacement", save=False)
@@ -309,3 +307,5 @@ for i, T_snap in enumerate(T_record):
     sim_time = save_times[i] * 3600
     plot.plot_1d_temperature(r_all, T_snap, sim_time)
 """
+
+
