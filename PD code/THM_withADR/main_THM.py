@@ -142,12 +142,7 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom, interior_inds_bottom, axis
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left, interior_inds_left, axis=1)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right, interior_inds_right, 274.15, axis=1, z_mask=None, r_mask=None)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top, interior_inds_top, 274.15, axis=0, z_mask=None, r_mask=None)
-valid_mask = np.ones(Rmat.shape, dtype=bool)
-valid_mask[:ghost_nodes_z, :ghost_nodes_x] = False  # 左上角
-valid_mask[:ghost_nodes_z, -ghost_nodes_x:] = False# 右上角
-#valid_mask[-ghost_nodes_z:, :ghost_nodes_x] = False # 左下角
-#valid_mask[-ghost_nodes_z:, -ghost_nodes_x:] = False # 右下角
-T[~valid_mask] = 265.15
+
 
 # core function of thermal and mechanical
 def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho , T_curr,Tpre_avg):
