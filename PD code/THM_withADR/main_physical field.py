@@ -22,7 +22,7 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 80, 80         # Number of cells in r and z directions
+Nr, Nz = 20, 20         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
 E = 1e9                  # Elastic modulus [Pa]
@@ -64,7 +64,7 @@ Nr_tot = len(r_all)
 z_phys = np.linspace(Lz - dz / 2, dz / 2, Nz)
 z_ghost_top = np.linspace(Lz + (ghost_nodes_z - 1) * dz + dz / 2, Lz + dz / 2, ghost_nodes_z)
 z_ghost_bot = np.linspace(0 - dz / 2, -ghost_nodes_z * dz + dz / 2, ghost_nodes_z)
-z_all = np.concatenate([z_ghost_top, z_phys, z_ghost_bot])
+z_all = np.concatenate([z_ghost_top,z_phys, z_ghost_bot])
 Nz_tot = len(z_all)
 
 # Meshgrid
@@ -152,8 +152,8 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,d
 bz = np.zeros_like(Rmat)
 
 # Pressure value
-pressure = 1000e3/dr/2  # Pa, downward pressure
-inds_top =[0,1]
+pressure = 1000e3/delta  # Pa, downward pressure
+inds_top =[0,1,2]
 bz[inds_top, :] = -pressure
 bz = bz.flatten()
 
