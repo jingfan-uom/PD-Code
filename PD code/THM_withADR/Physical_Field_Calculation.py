@@ -2,71 +2,61 @@ import numpy as np
 
 
 
-def compute_direction_matrix(X, Y, Ux, Uz, horizon_mask):
+def compute_direction_matrix(x, y, ux, uz, horizon_mask): 
     """
     Compute updated direction matrix based on current relative positions: (x' + u') - (x + u)
 
     Inputs:
-    - X, Y: coordinate grids (Ny, Nx)
-    - Ux, Uz: displacement fields (Ny, Nx)
+    - x, y: coordinate vectors (N,)
+    - ux, uz: displacement vectors (N,)
     - horizon_mask: (N, N) interaction mask
 
     Outputs:
     - dir_x, dir_z: direction unit vectors (N, N)
     """
-    x = X.flatten()
-    y = Y.flatten()
-    ux = Ux.flatten()
-    uz = Uz.flatten()
-
     # Current relative positions: (x' + u') - (x + u)
     dx_eff = (x[None, :] + ux[None, :]) - (x[:, None] + ux[:, None])
     dz_eff = (y[None, :] + uz[None, :]) - (y[:, None] + uz[:, None])
 
     dist_eff = np.sqrt(dx_eff**2 + dz_eff**2)
-    dist_eff[~horizon_mask] = 1.0  # avoid division by zero outside horizon
 
-    dir_x = np.where(horizon_mask, dx_eff / dist_eff, 0.0)
-    dir_z = np.where(horizon_mask, dz_eff / dist_eff, 0.0)
+    # 只对 horizon_mask == True 的元素计算，其他点直接设为 0
+    dir_x = np.zeros_like(dx_eff)
+    dir_z = np.zeros_like(dz_eff)
+
+    dir_x[horizon_mask] = dx_eff[horizon_mask] / dist_eff[horizon_mask]
+    dir_z[horizon_mask] = dz_eff[horizon_mask] / dist_eff[horizon_mask]
 
     return dir_x, dir_z
 
 
-def compute_s_matrix(X, Y, Ux, Uz, horizon_mask):
+
+def compute_s_matrix(x_flat, y_flat, Ux, Uz, horizon_mask, distance_matrix):
     """
     Compute the elongation matrix s_matrix (N, N) using 2D grid input and horizon_mask.
 
     Parameters:
-        X, Y: original mesh coordinates (Ny, Nx)
-        Ux, Uz: displacement fields at corresponding points (Ny, Nx)
-        horizon_mask: boolean array of shape (N, N)
+        X, Y: original mesh coordinates
+        Ux, Uz: displacement fields at corresponding points
+        horizon_mask: boolean array of shape
+        distance_matrix :Initial lengths
 
     Returns:
         s_matrix: elongation matrix of shape (N, N)
     """
     # Deformed coordinates
-    x_def = (Ux + X).flatten()
-    y_def = (Uz + Y).flatten()
+    x_def = (Ux + x_flat)
+    y_def = (Uz + y_flat)
     # Original coordinates
-    x_flat = X.flatten()
-    y_flat = Y.flatten()
-
-    # Initial lengths
-    dx0 = x_flat[None, :] - x_flat[:, None]
-    dz0 = y_flat[None, :] - y_flat[:, None]
-    L0 = np.sqrt(dx0 ** 2 + dz0 ** 2)
 
     # Deformed lengths
     dx1 = x_def[None, :] - x_def[:, None]
     dz1 = y_def[None, :] - y_def[:, None]
     L1 = np.sqrt(dx1 ** 2 + dz1 ** 2)
 
-    # Avoid division by zero
-    L0[L0 == 0] = 1.0
-
     # Elongation computation
-    s_matrix = np.zeros_like(L0)
-    s_matrix[horizon_mask] = (L1[horizon_mask] - L0[horizon_mask]) / L0[horizon_mask]
+    s_matrix = np.zeros_like(distance_matrix)
+    s_matrix[horizon_mask] = (L1[horizon_mask] - distance_matrix[horizon_mask]) / distance_matrix[horizon_mask]
 
     return s_matrix
 
