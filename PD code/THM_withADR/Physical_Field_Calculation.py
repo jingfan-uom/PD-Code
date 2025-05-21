@@ -78,12 +78,9 @@ def compute_delta_temperature(T_grid,  Tpre_avg):
     Tcurr_flat = T_grid.flatten()  # (N,)
     T_i = Tcurr_flat [:, np.newaxis]  # shape (N, 1)
     T_j = Tcurr_flat [np.newaxis, :]  # shape (1, N)
-    Tcurr_avg = 0.5 * (T_i + T_j)  # shape (N, N)
+    Tcurr_avg = 0.5 * (T_i + T_j) - Tpre_avg# shape (N, N)
 
-
-    T_delta = Tcurr_avg - Tpre_avg
-
-    return T_delta
+    return Tcurr_avg
 
 
 def compute_velocity_third_step(Vr_half, Vz_half, Ar_next, Az_next, dt):
