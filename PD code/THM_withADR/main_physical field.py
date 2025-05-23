@@ -15,17 +15,17 @@ import ADR
 # Physical and simulation parameters
 # ------------------------
 
-rho_s, cs, ks = 1800.0, 1688.0, 1
+rho_s, cs, ks = 1100.0, 1688.0, 1
 rho_l, cl, kl = 1000.0, 4182.0, 0.6
 Ts = 372.65
 Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 20, 20         # Number of cells in r and z directions
+Nr, Nz = 40, 40       # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
-E = 1e9                  # Elastic modulus [Pa]
+E = 3e9                  # Elastic modulus [Pa]
 nu = 0.25                # Poisson's ratio
 K = 1.0                  # Thermal conductivity [W/(m·K)]
 alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
@@ -92,15 +92,14 @@ else:
 
 # Compute partial area overlap matrix
 partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
-    r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance
-)
+    r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance, 0)
 horizon_mask = (distance_matrix > tolerance) & (partial_area_matrix != 0.0)
-
-# ------------------------
-# Temperature update function
-# ------------------------
-
-
+row_sum = np.sum(partial_area_matrix, axis=1)  # (N,)
+matrix_sum = row_sum[:, None] + row_sum[None, :]  # (N, N)
+ # 结果是一维 (N,) 各行的总和
+N = int(0.5 * Nz_tot ** 2  - 0.5 * Nz_tot)
+V0 = np.sum(partial_area_matrix[N, :])
+c_matrix =  2 * np.pi * delta**2 / matrix_sum *c
 # ------------------------
 # Initialize displacement, velocity, and acceleration fields
 # ------------------------
@@ -126,7 +125,7 @@ ghost_inds_right_1d = [i * Nz_tot + j for i in range(Nr_tot) for j in range(Nz_t
 ghost_inds_top_1d = [i * Nz_tot + j for i in range(ghost_nodes_z) for j in range(Nz_tot)]
 ghost_inds_bottom_1d = [i * Nz_tot + j for i in range(Nr_tot - ghost_nodes_z, Nr_tot) for j in range(Nz_tot)]
 # core function of thermal and mechanical
-def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho ,bz ):
+def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho ,br, bz ):
     """
     Use three functions in Physical_Field_Calculation to calculate total displacement field.
     """
@@ -135,10 +134,10 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,d
 
     Relative_elongation = pfc.compute_s_matrix(r_flat, z_flat, Ur_new, Uz_new, horizon_mask,distance_matrix)
 
-    Ar_new = dir_r * c * (Relative_elongation) * partial_area_matrix / rho
-    Az_new = dir_z * c * (Relative_elongation) * partial_area_matrix / rho
+    Ar_new = dir_r * c_matrix  * (Relative_elongation) * partial_area_matrix / rho
+    Az_new = dir_z * c_matrix  * (Relative_elongation) * partial_area_matrix / rho
 
-    Ar_new = np.sum(Ar_new, axis=1)  # Shape matches Ur_curr
+    Ar_new = np.sum(Ar_new, axis=1) + br / rho # Shape matches Ur_curr
     Az_new = np.sum(Az_new, axis=1) + bz / rho
     # Set acceleration to zero at top ghost region
 
@@ -149,18 +148,18 @@ def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,d
 
 
 # Apply initial boundary conditions
-bz = np.zeros_like(Rmat)
-
+br = np.zeros_like(Rmat)
+bz = np.zeros_like(Zmat)
 # Pressure value
-pressure = 1000e3/delta  # Pa, downward pressure
+pressure = 2000e3/delta  # Pa, downward pressure
 inds_top =[0,1,2]
-bz[inds_top, :] = -pressure
+br[:,ghost_inds_left] = pressure
+br = br.flatten()
 bz = bz.flatten()
-
 dt_m = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
 dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta)
 
-Ar, Az = compute_accelerated_velocity(Ur, Uz,r_flat, z_flat, horizon_mask, dir_r ,dir_z , c , partial_area_matrix , rho_s,bz)
+Ar, Az = compute_accelerated_velocity(Ur, Uz,r_flat, z_flat, horizon_mask, dir_r ,dir_z , c , partial_area_matrix , rho_s,br, bz)
 
 Fr_0 = Ar * rho_s
 Fz_0 = Az * rho_s
@@ -190,7 +189,7 @@ for step in range(nsteps):
     previous_Ur = Ur
     previous_Uz = Uz
     Ar, Az = compute_accelerated_velocity(Ur, Uz, r_flat, z_flat, horizon_mask, dir_r, dir_z, c, partial_area_matrix,
-                                              rho_s, bz)
+                                              rho_s, br, bz)
 
     Fr = Ar * rho_s
     Fz = Az * rho_s
@@ -202,11 +201,12 @@ for step in range(nsteps):
     Vz_half, Uz = ADR.adr_update_velocity_displacement(Uz, Vz_half, Fz, cz_n, lambda_diag_matrix, 1)
 
     Uz[ghost_inds_bottom_1d] = 0
-    Uz[ghost_inds_left_1d] = 0
+    #Uz[ghost_inds_right_1d] = 0
+    #Uz[ghost_inds_left_1d] = 0
 
-    Ur[ghost_inds_bottom_1d] = 0
-    Ur[ghost_inds_left_1d] = 0
-
+    #Ur[ghost_inds_bottom_1d] = 0
+    Ur[ghost_inds_right_1d] = 0
+    #Ur[ghost_inds_left_1d] = 0
     dir_r, dir_z = pfc.compute_direction_matrix(r_flat, z_flat, Ur, Uz, horizon_mask)
 
     #Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
@@ -220,7 +220,7 @@ for step in range(nsteps):
 
     rms_increment = np.sqrt(np.mean(delta_Ur ** 2 + delta_Uz ** 2))
 
-    if rms_increment < 1e-11:
+    if rms_increment < 1e-12:
         print(f"Convergence reached at step {step} with RMS displacement increment {rms_increment}")
 
         break
@@ -238,12 +238,13 @@ time = end_time - start_time
 mask = np.ones(Rmat.shape, dtype=bool)
 
 # 将 ghost 点置为 False
+mask[ghost_inds_top, :] = False
 mask[ghost_inds_bottom, :] = False
 mask[:, ghost_inds_left] = False
 mask[:, ghost_inds_right] = False
 Ur = Ur.reshape(Rmat.shape)
 Uz = Uz.reshape(Zmat.shape)
-plot.plot_displacement_field(Rmat, Zmat, Ur, Uz,mask, title_prefix="Final Displacement", save=False)
+plot.plot_displacement_field(Rmat, Zmat, Ur, Uz,mask, Lr, Lz, title_prefix="Final Displacement", save=False)
 
 # Optional: 1D profile plots
 """
