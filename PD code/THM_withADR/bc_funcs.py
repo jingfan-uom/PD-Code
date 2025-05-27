@@ -73,7 +73,7 @@ def apply_bc_dirichlet_mirror(Tarr, ghost_inds, interior_inds, T_bc,
             # Apply only to columns where r_mask is True
             col_inds = np.where(r_mask)[0]
             Tarr[ghost_inds[:, None], col_inds[None, :]] = (
-                2.0 * T_bc - Tarr[interior_inds[:, None], col_inds[None, :]]
+                2.0 * T_bc  - Tarr[interior_inds[:, None], col_inds[None, :]]
             )
 
     else:
@@ -104,6 +104,8 @@ def apply_bc_dirichlet_mirror_disp(Uarr, ghost_inds, interior_inds, U_bc, axis, 
     """
     if Uarr.ndim == 1:
         Uarr[ghost_inds] = 2.0 * U_bc - Uarr[interior_inds]
+
+
         return Uarr
 
     if axis == 0:
@@ -122,57 +124,101 @@ def apply_bc_dirichlet_mirror_disp(Uarr, ghost_inds, interior_inds, U_bc, axis, 
             Uarr[row_inds[:, None], ghost_inds[None, :]] = (
                 2.0 * U_bc - Uarr[row_inds[:, None], interior_inds[None, :]]
             )
+
     return Uarr
 
 
-
-def get_top_ghost_indices(z_all, ghost_nodes_z):
+def apply_bc_free_boundary(Uarr, ghost_inds, interior_inds, axis):
     """
-    Compute indices of top ghost nodes and corresponding interior nodes.
+    Apply free boundary condition (zero transverse shear): U_ghost = U_interior
+
+    Parameters:
+    -----------
+    Uarr : np.ndarray
+        Displacement array (e.g., Uz or Ur), either 1D (Nr_tot * Nz_tot,) or 2D (Nz_tot, Nr_tot)
+
+    ghost_inds : array-like or tuple
+        Indices of ghost nodes. If axis=0, they refer to rows; if axis=1, they refer to columns.
+
+    interior_inds : array-like or tuple
+        Indices of the interior nodes adjacent to ghost nodes.
+
+    axis : int
+        0 for top/bottom (rows), 1 for left/right (columns)
+
+    Returns:
+    --------
+    Uarr : np.ndarray
+        Updated displacement array after applying free boundary condition.
     """
-    ghost_inds_top = np.arange(ghost_nodes_z)  # e.g. [0, 1, 2, ...]
-    interior_inds_top = 2 * ghost_nodes_z - ghost_inds_top - 1
-    return ghost_inds_top, interior_inds_top
+    if Uarr.ndim == 1:
+        raise ValueError("Uarr should be reshaped to 2D before applying free boundary condition.")
+
+    if axis == 1:
+        # Row-wise (top/bottom ghost layer)
+        Uarr[ghost_inds, :] = Uarr[interior_inds, :]
+    elif axis == 0:
+        # Column-wise (left/right ghost layer)
+        Uarr[:, ghost_inds] = Uarr[:, interior_inds]
+    else:
+        raise ValueError("Axis must be 0 (rows) or 1 (columns).")
+
+    return Uarr
 
 
-def get_bottom_ghost_indices(z_all, ghost_nodes_z):
+def get_left_ghost_indices(r_all, ghost_nodes_x, Nz_tot):
     """
-    Compute indices of bottom ghost nodes and corresponding interior nodes.
+    Compute left ghost node indices and corresponding interior node indices.
     """
-    Nz_tot = len(z_all)
-    ghost_inds_bottom = np.arange(Nz_tot - 1, Nz_tot - ghost_nodes_z - 1, -1)
-    # e.g. if Nz_tot=50, ghost_nodes_z=3 => [49, 48, 47]
-
-    z_local = np.arange(ghost_nodes_z)  # [0, 1, 2]
-    interior_inds_bottom = (Nz_tot - 1) - (2 * ghost_nodes_z - z_local - 1)
-    # Matches ghost_inds_bottom one-to-one
-
-    return ghost_inds_bottom, interior_inds_bottom
-
-
-def get_left_ghost_indices(r_all, ghost_nodes_x):
-    """
-    Compute indices of left ghost nodes and corresponding interior nodes.
-    """
+    Nr_tot = len(r_all)
     ghost_inds_left = np.arange(ghost_nodes_x)
-    # e.g. ghost_nodes_x=3 => [0, 1, 2]
-
     interior_inds_left = 2 * ghost_nodes_x - ghost_inds_left - 1
-    # Mirror indices corresponding to the left ghost nodes
 
-    return ghost_inds_left, interior_inds_left
+    # Flattened 1D indices
+    ghost_inds_left_1d = [i * Nr_tot + j for i in range(Nz_tot) for j in range(ghost_nodes_x)]
+    return ghost_inds_left, interior_inds_left, ghost_inds_left_1d
 
 
-def get_right_ghost_indices(r_all, ghost_nodes_x):
+def get_right_ghost_indices(r_all, ghost_nodes_x, Nz_tot):
     """
-    Compute indices of right ghost nodes and corresponding interior nodes.
+    Compute right ghost node indices and corresponding interior node indices.
     """
     Nr_tot = len(r_all)
     ghost_inds_right = np.arange(Nr_tot - 1, Nr_tot - ghost_nodes_x - 1, -1)
-    # e.g. Nr_tot=50, ghost_nodes_x=3 => [49, 48, 47]
-
-    x_local = np.arange(ghost_nodes_x)       # [0, 1, 2]
-    offsets = 2 * ghost_nodes_x - 1 - 2 * x_local  # e.g. [5, 3, 1]
+    x_local = np.arange(ghost_nodes_x)
+    offsets = 2 * ghost_nodes_x - 1 - 2 * x_local
     interior_inds_right = ghost_inds_right - offsets
 
-    return ghost_inds_right, interior_inds_right
+    # Flattened 1D indices
+    ghost_inds_right_1d = [i * Nr_tot + j for i in range(Nz_tot) for j in range(Nr_tot - ghost_nodes_x, Nr_tot)]
+    return ghost_inds_right, interior_inds_right, ghost_inds_right_1d
+
+
+def get_top_ghost_indices(z_all, ghost_nodes_z, Nr_tot):
+    """
+    Compute top ghost node indices and corresponding interior node indices.
+    """
+    ghost_inds_top = np.arange(ghost_nodes_z)
+    interior_inds_top = 2 * ghost_nodes_z - ghost_inds_top - 1
+
+    # Flattened 1D indices
+
+    ghost_inds_top_1d = [i * Nr_tot + j for i in range(ghost_nodes_z) for j in range(Nr_tot)]
+
+    return ghost_inds_top, interior_inds_top, ghost_inds_top_1d
+
+
+def get_bottom_ghost_indices(z_all, ghost_nodes_z, Nr_tot):
+    """
+    Compute bottom ghost node indices and corresponding interior node indices.
+    """
+    Nz_tot = len(z_all)
+    ghost_inds_bottom = np.arange(Nz_tot - 1, Nz_tot - ghost_nodes_z - 1, -1)
+    z_local = np.arange(ghost_nodes_z)
+    interior_inds_bottom = (Nz_tot - 1) - (2 * ghost_nodes_z - z_local - 1)
+
+    # Flattened 1D indices
+    ghost_inds_bottom_1d = [i * Nr_tot + j for i in range(Nz_tot - ghost_nodes_z, Nz_tot) for j in range(Nr_tot)]
+
+    return ghost_inds_bottom, interior_inds_bottom, ghost_inds_bottom_1d
+
