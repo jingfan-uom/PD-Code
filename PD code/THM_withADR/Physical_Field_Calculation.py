@@ -1,6 +1,6 @@
+
+from scipy.spatial import cKDTree
 import numpy as np
-
-
 
 def compute_direction_matrix(x, y, ux, uz, horizon_mask): 
     """
@@ -74,28 +74,48 @@ def compute_delta_temperature(T_grid,  Tpre_avg):
     Returns:
         T_delta: difference between current and previous average temperature matrices
     """
-
-    Tcurr_flat = T_grid.flatten()  # (N,)
-    T_i = Tcurr_flat [:, np.newaxis]  # shape (N, 1)
-    T_j = Tcurr_flat [np.newaxis, :]  # shape (1, N)
+    T_i = T_grid [:, np.newaxis]  # shape (N, 1)
+    T_j = T_grid [np.newaxis, :]  # shape (1, N)
     Tcurr_avg = 0.5 * (T_i + T_j) - Tpre_avg# shape (N, N)
 
     return Tcurr_avg
 
 
-def compute_velocity_third_step(Vr_half, Vz_half, Ar_next, Az_next, dt):
+
+import numpy as np
+from scipy.spatial import cKDTree
+
+def shrink_Tth_by_matching_coords( Rmat_m, Zmat_m, Rmat_th, Zmat_th):
     """
-    Implements step 3 in Equation (14): update velocity to time step n+1 using next-step acceleration.
+    删除 Tth 中与 Rmat_m/Zmat_m 坐标不对应的点，仅保留对应点。
 
-    Parameters:
-        Vr_half, Vz_half: intermediate velocities at (n+1/2) in r and z directions
-        Ar_next, Az_next: next-step accelerations in r and z directions
-        dt: time step
+    参数：
+        Tth        - 一维数组，展开的 T_th（长度 M）
+        Rmat_m     - 目标区域 r 坐标（2D）
+        Zmat_m     - 目标区域 z 坐标（2D）
+        Rmat_th    - Tth 的 r 坐标（2D）
+        Zmat_th    - Tth 的 z 坐标（2D）
 
-    Returns:
-        Vr_new, Vz_new: updated velocities at full step (n+1) in r and z directions
+    返回：
+        Tth_shrunk - 删除不相关坐标后的 Tth 子数组（一维，长度 = T_m.size）
     """
-    Vr_new = Vr_half + 0.5 * dt * Ar_next
-    Vz_new = Vz_half + 0.5 * dt * Az_next
-    return Vr_new, Vz_new
+    # 所有原始坐标（参考网格）
+    points_th = np.column_stack((Rmat_th.ravel(), Zmat_th.ravel()))
+    # 目标坐标（只保留这些）
+    points_m = np.column_stack((Rmat_m.ravel(), Zmat_m.ravel()))
 
+    # 构建 KDTree，找到目标区域的索引
+    tree = cKDTree(points_th)
+    _, indices = tree.query(points_m)
+    return indices
+
+
+def filter_array_by_indices_keep_only(Tarr, indices):
+
+    keep_mask = np.zeros_like(Tarr, dtype=bool)
+    keep_mask[indices] = True
+
+    # 删除不需要的索引
+    Tth_shrunk = Tarr[keep_mask]
+
+    return Tth_shrunk
