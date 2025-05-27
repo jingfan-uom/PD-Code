@@ -45,7 +45,7 @@ tolerance = 1e-8
 r_all_m, z_all_m, Nr_tot_m, Nz_tot_m = gc.generate_coordinates(
     r_start, z_start, dr, dz, Lr, Lz, Nr, Nz, ghost_nodes_x, ghost_nodes_z,
     r_ghost_left=True, r_ghost_right=True,
-    z_ghost_top=False, z_ghost_bot=True)
+    z_ghost_top=True, z_ghost_bot=True)
 Nr_tot_m = len(r_all_m)
 Nz_tot_m = len(z_all_m)
 Rmat_m, Zmat_m = np.meshgrid(r_all_m, z_all_m, indexing='xy')
@@ -280,14 +280,16 @@ time = end_time - start_time
 # ------------------------
 # Post-processing: visualization
 # ------------------------
-mask = np.ones(Rmat_m.shape, dtype=bool)
-mask[ghost_inds_top_m, :] = True
-mask[ghost_inds_bottom_m, :] = False
-mask[:, ghost_inds_left_m] = False
-mask[:, ghost_inds_right_m] = False
+#mask_m and mask_th Used to exclude displacement and temperature of boundary particles
+
+mask_m = np.ones(Rmat_m.shape, dtype=bool)
+mask_m[ghost_inds_top_m, :] = False
+mask_m[ghost_inds_bottom_m, :] = False
+mask_m[:, ghost_inds_left_m] = False
+mask_m[:, ghost_inds_right_m] = False
 Ur = Ur.reshape(Rmat_m.shape)
 Uz = Uz.reshape(Zmat_m.shape)
-plot.plot_displacement_field(Rmat_m, Zmat_m, Ur, Uz, mask, Lr, Lz, title_prefix="Final Displacement", save=False)
+plot.plot_displacement_field(Rmat_m, Zmat_m, Ur, Uz, mask_m, Lr, Lz, title_prefix="Final Displacement", save=False)
 
 mask_th = np.ones(T.shape, dtype=bool)
 mask_th[ghost_inds_top_m, :] = False
