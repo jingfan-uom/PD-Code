@@ -142,7 +142,7 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom_th, interior_inds_bottom_th
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left_th, interior_inds_left_th, axis=1)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right_th, interior_inds_right_th, 274.15, axis=1, z_mask=None, r_mask=None)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top_th, interior_inds_top_th, 274.15, axis=0, z_mask=None, r_mask=None)
-T [~mask_corner] =265.15
+T [~mask_corner] = 2 * 274.15 - 283. 15
 
 
 
