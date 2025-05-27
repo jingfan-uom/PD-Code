@@ -95,9 +95,9 @@ true_indices_th = np.where(horizon_mask_th)
 mask_corner = np.ones((Nz_tot_th, Nr_tot_th), dtype=bool)
 mask_corner [0:ghost_nodes_z, 0:ghost_nodes_x] = False        # 左上
 mask_corner [0:ghost_nodes_z, -ghost_nodes_x:] = False        # 右上
-mask_corner [-ghost_nodes_z:, 0:ghost_nodes_x] = False        # 左下
-mask_corner [-ghost_nodes_z:, -ghost_nodes_x:] = False
-"""# 右下
+mask_corner [-ghost_nodes_z:, 0:ghost_nodes_x] = True        # 左下
+mask_corner [-ghost_nodes_z:, -ghost_nodes_x:] = False       # 右下
+"""
 false_indices_2d = np.where(mask_corner == False)
 false_indices_flat = np.ravel_multi_index(false_indices_2d, mask_corner.shape)
 
@@ -283,10 +283,10 @@ time = end_time - start_time
 #mask_m and mask_th Used to exclude displacement and temperature of boundary particles
 
 mask_m = np.ones(Rmat_m.shape, dtype=bool)
-mask_m[ghost_inds_top_m, :] = False
+mask_m[ghost_inds_top_m, :] = True
 mask_m[ghost_inds_bottom_m, :] = False
 mask_m[:, ghost_inds_left_m] = False
-mask_m[:, ghost_inds_right_m] = False
+mask_m[:, ghost_inds_right_m] = True
 Ur = Ur.reshape(Rmat_m.shape)
 Uz = Uz.reshape(Zmat_m.shape)
 plot.plot_displacement_field(Rmat_m, Zmat_m, Ur, Uz, mask_m, Lr, Lz, title_prefix="Final Displacement", save=False)
