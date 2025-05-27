@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MultipleLocator
 
-def temperature(R_all, Z_all, T, total_time, nsteps, dr, dz, time, mask):
+def temperature(R_all, Z_all, T, total_time, nsteps, dr, dz, time, mask,Lr,Lz):
     import numpy as np
     import matplotlib.pyplot as plt
 
@@ -16,8 +16,8 @@ def temperature(R_all, Z_all, T, total_time, nsteps, dr, dz, time, mask):
     plt.figure(figsize=(6, 5))
     levels = np.arange(274, 275, 0.2)
     ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, 0.01])
-    plt.ylim([0.0, 0.01])
+    plt.xlim([0.0, Lr])
+    plt.ylim([0.0, Lz])
     cbar = plt.colorbar(ctf)
 
     cbar.set_label(
@@ -112,13 +112,7 @@ def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
     plt.close()
 
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-
-def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask=None, title_prefix="Displacement", save=False, time=0, dr=0, dz=0):
-    import numpy as np
-    import matplotlib.pyplot as plt
+def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask,Lr, Lz, title_prefix="Displacement",save=False):
 
     U_mag = np.sqrt(Ur**2 + Uz**2)
     if mask is None:
@@ -134,8 +128,8 @@ def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask=None, title_prefix="Displac
         ax.set_title(title)
         ax.set_xlabel("r (m)")
         ax.set_ylabel("z (m)")
-        ax.set_xlim(Rmat.min(), Rmat.max())
-        ax.set_ylim(Zmat.min(), Zmat.max())
+        ax.set_xlim(0, Lr)
+        ax.set_ylim(0, Lz)
         cbar = fig.colorbar(im, ax=ax)
 
         # 只在非ghost点里找最大最小
@@ -145,7 +139,6 @@ def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask=None, title_prefix="Displac
         # 竖排写到 colorbar label
         cbar.set_label(
             f"{title}\n"
-            f"Computation time: {time:.1f} s\n"
             f"Min: {vmin:.2e}, Max: {vmax:.2e}"
         )
 
