@@ -7,22 +7,24 @@ def generate_coordinates(
     z_ghost_top, z_ghost_bot
 ):
     """
-    生成包含 ghost 区域的 r 和 z 坐标数组，根据布尔值参数控制是否生成对应的 ghost 区域。
+    Generate r and z coordinate arrays including ghost regions. 
+    Each ghost region can be selectively added based on boolean flags.
 
-    参数：
-    - r_start, z_start: 物理域的起始坐标
-    - dr, dz: 网格间距
-    - Lr, Lz: 物理域长度
-    - Nr, Nz: 物理域中的节点数
-    - ghost_nodes_x, ghost_nodes_z: 每个方向上的 ghost 节点数量
-    - r_ghost_left, r_ghost_right, z_ghost_top, z_ghost_bot: 是否生成对应方向的 ghost 区域（布尔值）
+    Parameters:
+    - r_start, z_start: starting coordinates of the physical domain
+    - dr, dz: grid spacing in r and z directions
+    - Lr, Lz: length of the physical domain in r and z directions
+    - Nr, Nz: number of grid nodes in the physical domain
+    - ghost_nodes_x, ghost_nodes_z: number of ghost nodes in r and z directions
+    - r_ghost_left, r_ghost_right, z_ghost_top, z_ghost_bot: 
+        booleans indicating whether to include ghost regions on each side
 
-    返回：
-    - r_all, z_all: 包含 ghost 节点的 r 和 z 坐标数组
-    - Nr_tot, Nz_tot: 包括 ghost 节点的总节点数
+    Returns:
+    - r_all, z_all: coordinate arrays including ghost nodes
+    - Nr_tot, Nz_tot: total number of nodes including ghost regions
     """
 
-    # r方向
+    # r-direction (horizontal)
     r_phys = np.linspace(r_start + dr / 2, r_start + Lr - dr / 2, Nr)
 
     r_parts = []
@@ -41,7 +43,7 @@ def generate_coordinates(
     r_all = np.concatenate(r_parts)
     Nr_tot = len(r_all)
 
-    # z方向
+    # z-direction (vertical, reversed order: top to bottom)
     z_phys = np.linspace(z_start + Lz - dz / 2, z_start + dz / 2, Nz)
 
     z_parts = []
