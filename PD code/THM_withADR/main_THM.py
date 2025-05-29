@@ -98,19 +98,6 @@ partial_area_matrix_th = area_matrix_calculator.compute_partial_area_matrix(
 horizon_mask_th = ((distance_matrix_th > tolerance) & (partial_area_matrix_th != 0.0))
 true_indices_th = np.where(horizon_mask_th)
 
-mask_corner = np.ones((Nz_tot_th, Nr_tot_th), dtype=bool)
-mask_corner [0:ghost_nodes_z, 0:ghost_nodes_x] = False        # 左上
-mask_corner [0:ghost_nodes_z, -ghost_nodes_x:] = False        # 右上
-mask_corner [-ghost_nodes_z:, 0:ghost_nodes_x] = True        # 左下
-mask_corner [-ghost_nodes_z:, -ghost_nodes_x:] = False       # 右下
-"""
-false_indices_2d = np.where(mask_corner == False)
-false_indices_flat = np.ravel_multi_index(false_indices_2d, mask_corner.shape)
-
-for idx in false_indices_flat:
-    horizon_mask[idx, :] = False
-    horizon_mask[:, idx] = False
-"""
 # ------------------------
 # Preprocessing: shape factors, area weights, correction factors
 # ------------------------
@@ -149,6 +136,12 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left_th, interior_inds_left_th, ax
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right_th, interior_inds_right_th, 274.15, axis=1, z_mask=None, r_mask=None)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top_th, interior_inds_top_th, 274.15, axis=0, z_mask=None, r_mask=None)
 # Set corner points directly to the boundary temperature (274.15 K)
+
+mask_corner = np.ones((Nz_tot_th, Nr_tot_th), dtype=bool)
+mask_corner [0:ghost_nodes_z, 0:ghost_nodes_x] = True        # upper left corner
+mask_corner [0:ghost_nodes_z, -ghost_nodes_x:] = True       # upper right corner
+mask_corner [-ghost_nodes_z:, 0:ghost_nodes_x] = False         # lower left corner
+mask_corner [-ghost_nodes_z:, -ghost_nodes_x:] = True      # lower right corner
 T[~mask_corner] = 274.15
 
 
