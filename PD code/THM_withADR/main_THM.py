@@ -42,10 +42,16 @@ tolerance = 1e-8
 # ==========================
 #  Mechanical field coordinates
 # ==========================
+# Note:
+# The boolean flags r_ghost_left, r_ghost_right, z_ghost_top, and z_ghost_bot
+# determine whether ghost particles are generated along each boundary direction.
+# Set to True to generate ghost particles (used for applying boundary conditions).
+# Set to False to leave the boundary as free, without generating ghost particles.
 r_all_m, z_all_m, Nr_tot_m, Nz_tot_m = gc.generate_coordinates(
     r_start, z_start, dr, dz, Lr, Lz, Nr, Nz, ghost_nodes_x, ghost_nodes_z,
-    r_ghost_left=True, r_ghost_right=True,
-    z_ghost_top=True, z_ghost_bot=True)
+    r_ghost_left=True, r_ghost_right=False,
+    z_ghost_top=False, z_ghost_bot=True)
+
 Nr_tot_m = len(r_all_m)
 Nz_tot_m = len(z_all_m)
 Rmat_m, Zmat_m = np.meshgrid(r_all_m, z_all_m, indexing='xy')
@@ -142,7 +148,9 @@ T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_bottom_th, interior_inds_bottom_th
 T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left_th, interior_inds_left_th, axis=1)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right_th, interior_inds_right_th, 274.15, axis=1, z_mask=None, r_mask=None)
 T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top_th, interior_inds_top_th, 274.15, axis=0, z_mask=None, r_mask=None)
-T [~mask_corner] = 2 * 274.15 - 283. 15
+# Set corner points directly to the boundary temperature (274.15 K)
+T[~mask_corner] = 274.15
+
 
 
 
@@ -227,7 +235,7 @@ for step in range(nsteps_th):
     T = bc_funcs.apply_bc_zero_flux(T, ghost_inds_left_th, interior_inds_left_th, axis=1)
     T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_right_th, interior_inds_right_th, 274.15, axis=1, z_mask=None, r_mask=None)
     T = bc_funcs.apply_bc_dirichlet_mirror(T, ghost_inds_top_th, interior_inds_top_th, 274.15, axis=0, z_mask=None, r_mask=None)
-
+  
     if step % 10 == 0:
         print(f"[Temperature Step {step + 1}/{nsteps_th}]")
     for step in range(nsteps_m):
