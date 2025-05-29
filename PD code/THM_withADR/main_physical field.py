@@ -1,121 +1,234 @@
-
-from scipy.spatial import cKDTree
-import numpy as np
-
-def compute_direction_matrix(x, y, ux, uz, horizon_mask): 
-    """
-    Compute updated direction matrix based on current relative positions: (x' + u') - (x + u)
-
-    Inputs:
-    - x, y: coordinate vectors (N,)
-    - ux, uz: displacement vectors (N,)
-    - horizon_mask: (N, N) interaction mask
-
-    Outputs:
-    - dir_x, dir_z: direction unit vectors (N, N)
-    """
-    # Current relative positions: (x' + u') - (x + u)
-    dx_eff = (x[None, :] + ux[None, :]) - (x[:, None] + ux[:, None])
-    dz_eff = (y[None, :] + uz[None, :]) - (y[:, None] + uz[:, None])
-
-    dist_eff = np.sqrt(dx_eff**2 + dz_eff**2)
-
-    # 只对 horizon_mask == True 的元素计算，其他点直接设为 0
-    dir_x = np.zeros_like(dx_eff)
-    dir_z = np.zeros_like(dz_eff)
-
-    dir_x[horizon_mask] = dx_eff[horizon_mask] / dist_eff[horizon_mask]
-    dir_z[horizon_mask] = dz_eff[horizon_mask] / dist_eff[horizon_mask]
-
-    return dir_x, dir_z
-
-
-
-def compute_s_matrix(x_flat, y_flat, Ux, Uz, horizon_mask, distance_matrix):
-    """
-    Compute the elongation matrix s_matrix (N, N) using 2D grid input and horizon_mask.
-
-    Parameters:
-        X, Y: original mesh coordinates
-        Ux, Uz: displacement fields at corresponding points
-        horizon_mask: boolean array of shape
-        distance_matrix :Initial lengths
-
-    Returns:
-        s_matrix: elongation matrix of shape (N, N)
-    """
-    # Deformed coordinates
-    x_def = (Ux + x_flat)
-    y_def = (Uz + y_flat)
-    # Original coordinates
-
-    # Deformed lengths
-    dx1 = x_def[None, :] - x_def[:, None]
-    dz1 = y_def[None, :] - y_def[:, None]
-    L1 = np.sqrt(dx1 ** 2 + dz1 ** 2)
-
-    # Elongation computation
-    s_matrix = np.zeros_like(distance_matrix)
-    s_matrix[horizon_mask] = (L1[horizon_mask] - distance_matrix[horizon_mask]) / distance_matrix[horizon_mask]
-
-    return s_matrix
-
-
-def compute_delta_temperature(T_grid,  Tpre_avg):
-    """
-    Compute the average temperature matrix T_avg (N, N), and optionally return the delta
-    compared to the previous time step average temperature.
-
-    Parameters:
-        T_grid: 2D temperature field array (Ny, Nx)
-
-        T_prev_avg: previous time step average temperature matrix, shape (N, N)
-
-    Returns:
-        T_delta: difference between current and previous average temperature matrices
-    """
-    T_i = T_grid [:, np.newaxis]  # shape (N, 1)
-    T_j = T_grid [np.newaxis, :]  # shape (1, N)
-    Tcurr_avg = 0.5 * (T_i + T_j) - Tpre_avg# shape (N, N)
-
-    return Tcurr_avg
-
-
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
 
 import numpy as np
-from scipy.spatial import cKDTree
+import time
+import core_funcs as cf
+import plot_utils as plot
+import bc_funcs
+import area_matrix_calculator
+import Physical_Field_Calculation as pfc  # Import module containing three field functions
+import ADR
+import generate_coordinates as gc
+# ------------------------
+# Physical and simulation parameters
+# ------------------------
 
-def shrink_Tth_by_matching_coords( Rmat_m, Zmat_m, Rmat_th, Zmat_th):
+rho_s, cs, ks = 1800.0, 1688.0, 1
+rho_l, cl, kl = 1000.0, 4182.0, 0.6
+Ts = 372.65
+Tl = 373.65
+L = 333
+
+Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
+Nr, Nz = 60, 60       # Number of cells in r and z directions
+dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
+
+E = 1e9                  # Elastic modulus [Pa]
+nu = 0.25                # Poisson's ratio
+K = 1.0                  # Thermal conductivity [W/(m·K)]
+alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
+
+if Nz == 1:
+    dz = 0  # Treat as 1D if z direction is disabled
+
+delta = 3 * dr           # Horizon radius for nonlocal interaction
+ghost_nodes_x = 3        # Number of ghost cells in the x (or r) direction
+ghost_nodes_z = 3        # Number of ghost cells in the z direction
+h = 1
+
+
+# ------------------------
+# Construct grid coordinates (including ghost layers)
+# ------------------------
+r_start = 0.0  # Starting position in r-direction
+z_start = 0.0
+tolerance = 1e-8
+
+# ==========================
+#   r (or x) direction
+# ==========================
+
+r_ghost_left = True
+r_ghost_right = False
+z_ghost_top = False
+z_ghost_bot = True
+r_all, z_all, Nr_tot, Nz_tot = gc.generate_coordinates(
+    r_start, z_start, dr, dz, Lr, Lz, Nr, Nz, ghost_nodes_x, ghost_nodes_z,
+    r_ghost_left, r_ghost_right,
+    z_ghost_top, z_ghost_bot)
+Nr_tot = len(r_all)
+Nz_tot = len(z_all)
+Rmat, Zmat = np.meshgrid(r_all, z_all, indexing='xy')
+
+# ------------------------
+# Compute distance matrix and horizon mask
+# ------------------------
+r_flat = Rmat.flatten()
+z_flat = Zmat.flatten()
+
+# 2D: use Euclidean distance
+dx_r = r_flat[None, :] - r_flat[:, None]
+dx_z = z_flat[None, :] - z_flat[:, None]
+distance_matrix = np.sqrt(dx_r ** 2 + dx_z ** 2)
+
+# Compute partial area overlap matrix
+partial_area_matrix = area_matrix_calculator.compute_partial_area_matrix(
+    r_flat, z_flat, dr, dz, delta, distance_matrix, tolerance)
+
+horizon_mask = ((distance_matrix > tolerance) & (partial_area_matrix != 0.0))
+
+row_sum = np.sum(partial_area_matrix, axis=1)  # (N,)
+matrix_sum = row_sum[:, None] + row_sum[None, :]  # (N, N)
+ # 结果是一维 (N,) 各行的总和
+c = (6 * E) / (np.pi * delta**3 * h * (1 - 2 * nu) * (1 + nu))
+c_matrix = 2 * np.pi * delta**2 / matrix_sum * c
+# ------------------------
+# Initialize displacement, velocity, and acceleration fields
+# ------------------------
+Ur = np.zeros_like(Rmat).flatten()  # Radial displacement (1D)
+Uz = np.zeros_like(Zmat).flatten()  # Axial displacement (1D)
+
+Vr = np.zeros_like(Rmat).flatten()  # Radial velocity (1D)
+Vz = np.zeros_like(Zmat).flatten()  # Axial velocity (1D)
+
+Ar = np.zeros_like(Rmat).flatten()  # Radial acceleration (1D)
+Az = np.zeros_like(Zmat).flatten()  # Axial acceleration (1D)
+
+
+# Get ghost node indices from bc_funcs
+
+ghost_inds_left, interior_inds_left, ghost_inds_left_1d = bc_funcs.get_left_ghost_indices(r_all, ghost_nodes_x, Nz_tot)
+ghost_inds_right, interior_inds_right, ghost_inds_right_1d = bc_funcs.get_right_ghost_indices(r_all, ghost_nodes_x, Nz_tot)
+ghost_inds_top, interior_inds_top, ghost_inds_top_1d = bc_funcs.get_top_ghost_indices(z_all, ghost_nodes_z, Nr_tot)
+ghost_inds_bottom, interior_inds_bottom, ghost_inds_bottom_1d = bc_funcs.get_bottom_ghost_indices(z_all, ghost_nodes_z, Nr_tot)
+
+# core function of thermal and mechanical
+
+dir_r, dir_z = pfc.compute_direction_matrix(r_flat, z_flat, Ur, Uz, horizon_mask)
+def compute_accelerated_velocity(Ur_curr, Uz_curr,r_flat, z_flat, horizon_mask,dir_r ,dir_z ,c ,partial_area_matrix ,rho ,br, bz ):
     """
-    删除 Tth 中与 Rmat_m/Zmat_m 坐标不对应的点，仅保留对应点。
-
-    参数：
-        Tth        - 一维数组，展开的 T_th（长度 M）
-        Rmat_m     - 目标区域 r 坐标（2D）
-        Zmat_m     - 目标区域 z 坐标（2D）
-        Rmat_th    - Tth 的 r 坐标（2D）
-        Zmat_th    - Tth 的 z 坐标（2D）
-
-    返回：
-        Tth_shrunk - 删除不相关坐标后的 Tth 子数组（一维，长度 = T_m.size）
+    Use three functions in Physical_Field_Calculation to calculate total displacement field.
     """
-    # 所有原始坐标（参考网格）
-    points_th = np.column_stack((Rmat_th.ravel(), Zmat_th.ravel()))
-    # 目标坐标（只保留这些）
-    points_m = np.column_stack((Rmat_m.ravel(), Zmat_m.ravel()))
+    Ur_new = Ur_curr
+    Uz_new = Uz_curr
+    Relative_elongation = pfc.compute_s_matrix(r_flat, z_flat, Ur_new, Uz_new, horizon_mask,distance_matrix)
+    Ar_new = dir_r * c_matrix * Relative_elongation * partial_area_matrix / rho
+    Az_new = dir_z * c_matrix * Relative_elongation * partial_area_matrix / rho
+    Ar_new = np.sum(Ar_new, axis=1) + br / rho # Shape matches Ur_curr
+    Az_new = np.sum(Az_new, axis=1) + bz / rho
 
-    # 构建 KDTree，找到目标区域的索引
-    tree = cKDTree(points_th)
-    _, indices = tree.query(points_m)
-    return indices
+    return Ar_new, Az_new  # Or return other desired quantities
 
 
-def filter_array_by_indices_keep_only(Tarr, indices):
 
-    keep_mask = np.zeros_like(Tarr, dtype=bool)
-    keep_mask[indices] = True
+# Apply initial boundary conditions
+br = np.zeros_like(Rmat)
+bz = np.zeros_like(Zmat)
+# Pressure value
+pressure = 1000e3/dz  # Pa, downward pressure
+inds_top =[0]
+bz[inds_top,:] = -pressure
+br = br.flatten()
+bz = bz.flatten()
+dt_m = np.sqrt((2 * rho_s) / (np.pi * delta**2 * c)) * 0.1  # Time step in seconds
+dt_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks, partial_area_matrix, horizon_mask,distance_matrix,delta)
 
-    # 删除不需要的索引
-    Tth_shrunk = Tarr[keep_mask]
+Ar, Az = compute_accelerated_velocity(Ur, Uz,r_flat, z_flat, horizon_mask, dir_r ,dir_z , c_matrix , partial_area_matrix , rho_s,br, bz)
+lambda_diag_matrix = ADR.compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c_matrix, horizon_mask,1 ,dx_r, dx_z)
+Fr_0 = Ar * rho_s
+Fz_0 = Az * rho_s
+Vr_half = (1 / 2) * (Fr_0  / lambda_diag_matrix)
+Vz_half = (1 / 2) * (Fz_0  / lambda_diag_matrix)
+Ur = Vr_half * 1 + Ur
+Uz = Vz_half * 1 + Uz
+Uz[ghost_inds_bottom_1d] = 0
+Ur[ghost_inds_left_1d] = 0
+Ur[ghost_inds_bottom_1d] = 0
+Uz[ghost_inds_left_1d] = 0
 
-    return Tth_shrunk
+# ------------------------
+# Simulation loop settings
+# ------------------------
+
+total_time = 1000  # Total simulation time (e.g., 5 hours)
+nsteps = int(1000)
+print_interval = int(10 / dt_m)  # Print progress every 10 simulated seconds
+start_time = time.time()
+
+
+# ------------------------
+# Time-stepping loop
+# ------------------------
+save_times = [2, 4, 6, 8, 10]  # Save snapshots (in hours)
+save_steps = [int(t * 3600 / dt_m) for t in save_times]
+T_record = []  # Store temperature snapshots
+
+for step in range(nsteps):
+    previous_Ur = Ur
+    previous_Uz = Uz
+    Ar, Az = compute_accelerated_velocity(Ur, Uz, r_flat, z_flat, horizon_mask, dir_r, dir_z, c_matrix, partial_area_matrix,
+                                              rho_s, br, bz)
+
+    Fr = Ar * rho_s
+    Fz = Az * rho_s
+    cr_n = ADR.compute_local_damping_coefficient(Fr, Fr_0, Vr_half, lambda_diag_matrix, Ur, 1)
+    cz_n = ADR.compute_local_damping_coefficient(Fz, Fz_0, Vz_half, lambda_diag_matrix, Uz, 1)
+    Fr_0 = Fr
+    Fz_0 = Fz
+    Vr_half, Ur = ADR.adr_update_velocity_displacement(Ur, Vr_half, Fr, cr_n, lambda_diag_matrix, 1)
+    Vz_half, Uz = ADR.adr_update_velocity_displacement(Uz, Vz_half, Fz, cz_n, lambda_diag_matrix, 1)
+
+    Uz[ghost_inds_bottom_1d] = 0
+    Ur[ghost_inds_left_1d] = 0
+    Ur[ghost_inds_bottom_1d] = 0
+    Uz[ghost_inds_left_1d] = 0
+
+    #Ur[ghost_inds_right_1d] = 0
+    #Ur[ghost_inds_left_1d] = 0
+    dir_r, dir_z = pfc.compute_direction_matrix(r_flat, z_flat, Ur, Uz, horizon_mask)
+
+    #Ur, Uz, Vr_half, Vz_half = pfc.compute_next_displacement_field(Ur, Uz, Vr, Vz, Ar, Az,dt_m)
+    # Vr, Vz, Ar, Az = pfc.compute_next_velocity_third_step(Vr_half, Vz_half, Ur, Uz, dt_m)
+    #Uz[ghost_inds_bottom, :] = 0
+    #Ur[:, ghost_inds_left] = 0
+    # Ur[:, ghost_inds_right] = 0
+    # 计算当前位移增量的RMS
+    delta_Ur = Ur - previous_Ur
+    delta_Uz = Uz - previous_Uz
+
+    rms_increment = np.sqrt(np.mean(delta_Ur ** 2 + delta_Uz ** 2))
+
+    if rms_increment < 1e-12:
+        print(f"Convergence reached at step {step} with RMS displacement increment {rms_increment}")
+
+        break
+    if step % 10 == 0:
+        print(f"Step {step}/{nsteps} completed")
+
+end_time = time.time()
+print(f"Calculation finished, elapsed real time = {end_time - start_time:.2f}s")
+
+time = end_time - start_time
+
+# ------------------------
+# Post-processing: visualization
+# ------------------------
+mask = np.ones(Rmat.shape, dtype=bool)
+# 将 ghost 点置为 False
+mask[ghost_inds_top, :] = ~z_ghost_top
+mask[ghost_inds_bottom, :] = ~z_ghost_bot
+mask[:, ghost_inds_left] = ~r_ghost_left
+mask[:, ghost_inds_right] = ~r_ghost_right
+
+Ur = Ur.reshape(Rmat.shape)
+Uz = Uz.reshape(Zmat.shape)
+plot.plot_displacement_field(Rmat, Zmat, Ur, Uz,mask, Lr, Lz, title_prefix="Final Displacement", save=False)
+
+# Optional: 1D profile plots
+"""
+for i, T_snap in enumerate(T_record):
+    sim_time = save_times[i] * 3600
+    plot.plot_1d_temperature(r_all, T_snap, sim_time)
+"""
