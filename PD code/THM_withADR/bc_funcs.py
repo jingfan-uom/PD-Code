@@ -128,42 +128,35 @@ def apply_bc_dirichlet_mirror_disp(Uarr, ghost_inds, interior_inds, U_bc, axis, 
     return Uarr
 
 
-def apply_bc_free_boundary(Uarr, ghost_inds, interior_inds, axis):
+def set_corner_temperature_ghosts(T, ghost_nodes_z, ghost_nodes_r):
     """
-    Apply free boundary condition (zero transverse shear): U_ghost = U_interior
+    设置四个角落 ghost 区域的温度值，分别复制相邻的中间区域。
 
-    Parameters:
-    -----------
-    Uarr : np.ndarray
-        Displacement array (e.g., Uz or Ur), either 1D (Nr_tot * Nz_tot,) or 2D (Nz_tot, Nr_tot)
+    参数：
+    - T: ndarray，温度矩阵（2D）
+    - ghost_nodes_z: int，垂直方向 ghost 层数（行）
+    - ghost_nodes_r: int，水平方向 ghost 层数（列）
 
-    ghost_inds : array-like or tuple
-        Indices of ghost nodes. If axis=0, they refer to rows; if axis=1, they refer to columns.
-
-    interior_inds : array-like or tuple
-        Indices of the interior nodes adjacent to ghost nodes.
-
-    axis : int
-        0 for top/bottom (rows), 1 for left/right (columns)
-
-    Returns:
-    --------
-    Uarr : np.ndarray
-        Updated displacement array after applying free boundary condition.
+    返回：
+    - 修改后的 T
     """
-    if Uarr.ndim == 1:
-        raise ValueError("Uarr should be reshaped to 2D before applying free boundary condition.")
+    # ========== 右上角 ==========
+    # 将 T 最上面 ghost_nodes_z 行、最右 ghost_nodes_r 列 替换为下面一块区域
+    T[0:ghost_nodes_z, -ghost_nodes_r:] = T[ghost_nodes_z:2*ghost_nodes_z, -ghost_nodes_r:]
 
-    if axis == 1:
-        # Row-wise (top/bottom ghost layer)
-        Uarr[ghost_inds, :] = Uarr[interior_inds, :]
-    elif axis == 0:
-        # Column-wise (left/right ghost layer)
-        Uarr[:, ghost_inds] = Uarr[:, interior_inds]
-    else:
-        raise ValueError("Axis must be 0 (rows) or 1 (columns).")
+    # ========== 左上角 ==========
 
-    return Uarr
+
+    # ========== 右下角 ==========
+    T[-ghost_nodes_z:, -ghost_nodes_r:] = T[-2*ghost_nodes_z:-ghost_nodes_z, -ghost_nodes_r:]
+
+    # ========== 左下角 ==========
+    T[-ghost_nodes_z:, 0:ghost_nodes_r] = T[-2*ghost_nodes_z:-ghost_nodes_z, 0:ghost_nodes_r]
+
+    return T
+
+
+
 
 
 def get_left_ghost_indices(r_all, ghost_nodes_x, Nz_tot):
