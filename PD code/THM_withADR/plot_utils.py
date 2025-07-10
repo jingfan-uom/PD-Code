@@ -112,7 +112,10 @@ def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
     plt.close()
 
 
-def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask,Lr, Lz, title_prefix="Displacement",save=False):
+def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask, Lr, Lz, title_prefix="Displacement", save=False):
+    """
+    Plot Ur, Uz, and |U| fields using contourf, only considering the non-ghost (masked) area for min/max.
+    """
 
     U_mag = np.sqrt(Ur**2 + Uz**2)
     if mask is None:
@@ -132,11 +135,11 @@ def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask,Lr, Lz, title_prefix="Displ
         ax.set_ylim(0, Lz)
         cbar = fig.colorbar(im, ax=ax)
 
-        # 只在非ghost点里找最大最小
+        # Only search for the minimum and maximum within non-ghost points
         valid_field = np.where(mask, field, np.nan)
         vmin, vmax = np.nanmin(valid_field), np.nanmax(valid_field)
 
-        # 竖排写到 colorbar label
+        # Display as a vertical text on the colorbar label
         cbar.set_label(
             f"{title}\n"
             f"Min: {vmin:.2e}, Max: {vmax:.2e}"
@@ -147,4 +150,35 @@ def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask,Lr, Lz, title_prefix="Displ
         plt.savefig(f"{title_prefix}_field.png", dpi=300)
     plt.show()
 
+def plot_mu_field(Rmat, Zmat, mu, mask, Lr, Lz, title_prefix, save, filename):
+    """
+    Draw contour lines for mu, counting only the masked area.
+    """
+    if mask is None:
+        mask = np.ones_like(mu, dtype=bool)
+    masked_mu = np.where(mask, mu, np.nan)
 
+    fig, ax = plt.subplots(figsize=(7, 6))
+    levels = np.arange(0, 1.01, 0.05)  # Finer color gradation
+    cmap = plt.get_cmap('turbo')  # Use 'jet' or 'turbo' for a colormap closer to the target effect
+
+    im = ax.contourf(Rmat, Zmat, masked_mu, levels=levels, cmap=cmap, alpha=0.95)
+    im.set_clim(0, 1)
+
+    ax.set_title(f"{title_prefix} ($\mu$)", fontsize=13)
+    ax.set_xlabel("r (m)")
+    ax.set_ylabel("z (m)")
+    ax.set_xlim(0, Lr)
+    ax.set_ylim(0, Lz)
+
+    cbar = fig.colorbar(im, ax=ax, ticks=np.linspace(0, 1, 11))
+    cbar.set_label(f"{title_prefix} ($\mu$)", fontsize=12)
+
+    plt.tight_layout()
+    if save:
+        if filename is not None:
+            plt.savefig(filename)
+        else:
+            plt.savefig("mu_field.png")
+    plt.close()
+    plt.show()
