@@ -127,38 +127,6 @@ def apply_bc_dirichlet_mirror_disp(Uarr, ghost_inds, interior_inds, U_bc, axis, 
 
     return Uarr
 
-
-def set_corner_temperature_ghosts(T, ghost_nodes_z, ghost_nodes_r):
-    """
-    设置四个角落 ghost 区域的温度值，分别复制相邻的中间区域。
-
-    参数：
-    - T: ndarray，温度矩阵（2D）
-    - ghost_nodes_z: int，垂直方向 ghost 层数（行）
-    - ghost_nodes_r: int，水平方向 ghost 层数（列）
-
-    返回：
-    - 修改后的 T
-    """
-    # ========== 右上角 ==========
-    # 将 T 最上面 ghost_nodes_z 行、最右 ghost_nodes_r 列 替换为下面一块区域
-    T[0:ghost_nodes_z, -ghost_nodes_r:] = T[ghost_nodes_z:2*ghost_nodes_z, -ghost_nodes_r:]
-
-    # ========== 左上角 ==========
-
-
-    # ========== 右下角 ==========
-    T[-ghost_nodes_z:, -ghost_nodes_r:] = T[-2*ghost_nodes_z:-ghost_nodes_z, -ghost_nodes_r:]
-
-    # ========== 左下角 ==========
-    T[-ghost_nodes_z:, 0:ghost_nodes_r] = T[-2*ghost_nodes_z:-ghost_nodes_z, 0:ghost_nodes_r]
-
-    return T
-
-
-
-
-
 def get_left_ghost_indices(r_all, ghost_nodes_x, Nz_tot):
     """
     Compute left ghost node indices and corresponding interior node indices.
