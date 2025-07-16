@@ -3,154 +3,6 @@ import numpy as np
 from matplotlib.ticker import MultipleLocator
 from scipy.interpolate import griddata
 
-def temperature(R_all, Z_all, T, total_time, nsteps, dr, dz, time, mask,Lr,Lz):
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    if mask is None:
-        mask = np.ones_like(T, dtype=bool)
-    # 只在非ghost点里找最大最小
-    valid_field = np.where(mask, T, np.nan)
-    T_min = np.nanmin(valid_field)
-    T_max = np.nanmax(valid_field)
-
-    plt.figure(figsize=(6, 5))
-    levels = np.arange(300, 1101, 100)
-    ctf = plt.contourf(R_all, Z_all, T, levels=levels, cmap='jet')
-    plt.xlim([0.0, Lr])
-    plt.ylim([0.0, Lz])
-    cbar = plt.colorbar(ctf)
-
-    cbar.set_label(
-        f"Temperature (K)\n"
-        f"Computation time: {time:.1f} s\n"
-        f"Δr = {dr:.4f}, Δz = {dz:.4f}\n"
-        f"Min: {T_min:.2f} K\nMax: {T_max:.2f} K",
-        rotation=270, labelpad=30, va='bottom'
-    )
-
-    plt.xlabel("r (m)")
-    plt.ylabel("z (m)")
-    plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_z_profile(T_record, z_all, r_all, save_times_hours):
-    """
-    Plot temperature evolution over time at a fixed z slice (z = 0.4 m).
-
-    Parameters:
-    -----------
-    T_record : list of 2D arrays
-        Temperature snapshots at different times.
-    z_all : 1D array
-        z coordinates.
-    r_all : 1D array
-        r coordinates.
-    save_times_hours : list of floats
-        Simulation times (in hours) corresponding to T_record.
-    """
-    z_target = 0.4
-    z_index = np.argmin(np.abs(z_all - z_target))
-
-    plt.figure(figsize=(8, 5))
-    for T, t_hour in zip(T_record, save_times_hours):
-        plt.plot(r_all, T[z_index, :], label=f"{t_hour} h")
-
-    plt.xlabel("r (m)")
-    plt.ylabel("Temperature at z = 0.4 m (K)")
-    plt.title("z = 0.4 m Cross-sectional Temperature Evolution")
-    plt.xlim(0.2, 1.0)
-    plt.ylim(200, 500)
-
-    plt.gca().yaxis.set_major_locator(MultipleLocator(50))
-    plt.gca().yaxis.set_minor_locator(MultipleLocator(25))
-    plt.tick_params(axis='y', which='minor', length=4, color='gray')
-    plt.tick_params(axis='y', which='major', length=7)
-
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_1d_temperature(r_all, T, time_seconds, save_dir=None):
-    """
-    Plot 1D temperature profile (r-direction only), with optional saving.
-
-    Parameters:
-    -----------
-    r_all : 1D array
-        Radial coordinate (including ghost nodes if any).
-    T : 1D or 2D array
-        Temperature field. If 2D, it will be flattened.
-    time_seconds : float
-        Simulation time in seconds (for labeling).
-    save_dir : str, optional
-        If provided, saves the plot to the specified directory.
-    """
-    T = T.flatten()
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(r_all, T, 'r-', linewidth=2)
-    plt.xlabel("r (m)")
-    plt.ylabel("Temperature (K)")
-    plt.xlim(0.05, 1.45)
-    plt.ylim(300, 500)
-    plt.title(f"1D Temperature Distribution at t = {time_seconds/3600:.2f} h")
-    plt.grid(True)
-    plt.tight_layout()
-
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        fname = f"T_1D_{int(time_seconds)}s.png"
-        plt.savefig(os.path.join(save_dir, fname))
-        print(f"[plot] Saved 1D temperature plot to {os.path.join(save_dir, fname)}")
-    else:
-        plt.show()
-
-    plt.close()
-
-
-def plot_displacement_field(Rmat, Zmat, Ur, Uz, mask, Lr, Lz, title_prefix="Displacement", save=False):
-    """
-    Plot Ur, Uz, and |U| fields using contourf, only considering the non-ghost (masked) area for min/max.
-    """
-
-    U_mag = np.sqrt(Ur**2 + Uz**2)
-    if mask is None:
-        mask = np.ones_like(Ur, dtype=bool)
-
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    cmap = 'viridis'
-    fields = [Ur, Uz, U_mag]
-    titles = [f"{title_prefix} - Ur", f"{title_prefix} - Uz", f"{title_prefix} - |U|"]
-
-    for ax, field, title in zip(axes, fields, titles):
-        im = ax.contourf(Rmat, Zmat, field, cmap=cmap)
-        ax.set_title(title)
-        ax.set_xlabel("r (m)")
-        ax.set_ylabel("z (m)")
-        ax.set_xlim(0, Lr)
-        ax.set_ylim(0, Lz)
-        cbar = fig.colorbar(im, ax=ax)
-
-        # Only search for the minimum and maximum within non-ghost points
-        valid_field = np.where(mask, field, np.nan)
-        vmin, vmax = np.nanmin(valid_field), np.nanmax(valid_field)
-
-        # Display as a vertical text on the colorbar label
-        cbar.set_label(
-            f"{title}\n"
-            f"Min: {vmin:.2e}, Max: {vmax:.2e}"
-        )
-
-    plt.tight_layout()
-    if save:
-        plt.savefig(f"{title_prefix}_field.png", dpi=300)
-    plt.show()
-
 
 
 def plot_mu_field(Rmat, Zmat, mu, mask, Lr, Lz, title_prefix, save, filename):
@@ -194,7 +46,7 @@ def temperature_combined_four_regions(
     Lr1,Lr4,Lz1,Lz2,
     total_time, nsteps, levels):
     """
-    将四个区域的温度场绘制在一张图上（自动排除 ghost 区域）
+    Plot the temperature fields of the four regions on a single graph (automatically excluding ghost regions).
     """
 
     def extract(Rmat, Zmat, T, mask):
@@ -205,12 +57,12 @@ def temperature_combined_four_regions(
     R3, Z3, T3 = extract(R3mat, Z3mat, T3, mask3)
     R4, Z4, T4 = extract(R4mat, Z4mat, T4, mask4)
 
-    # --- 3. 合并所有区域数据 ---
+    # --- 3. Merge all regional data ---
     R_all = np.concatenate([R1, R2, R3, R4])
     Z_all = np.concatenate([Z1, Z2, Z3, Z4])
     T_all = np.concatenate([T1, T2, T3, T4])
 
-    # --- 4. 构造插值网格 ---
+    # --- 4. Constructing an interpolation grid ---
     r_min = np.min(R_all)
     r_max = np.max(R_all)
     z_min = np.min(Z_all)
@@ -230,7 +82,7 @@ def temperature_combined_four_regions(
     T_min = np.nanmin(T_grid)
     T_max = np.nanmax(T_grid)
 
-    # --- 5. 绘图 ---
+   # --- 5. Drawing ---
     fig, ax = plt.subplots(figsize=(7, 5))
     ctf = ax.contourf(R_grid, Z_grid, T_grid, levels=levels, cmap='jet')
     ax.set_xlim([1e-6, Lr1 + Lr4])
@@ -256,10 +108,10 @@ def displacement_combined_four_regions(
     Lr1, Lr4, Lz1, Lz2,
     total_time, nsteps, levels):
     """
-    将四个区域的位移场（Ur, Uz, U）分别插值后绘图，组合在一张图中，并显示 min/max。
+    Interpolate the displacement fields (Ur, Uz, U) of the four regions separately, plot them, combine them into a single image, and display the min/max values.
     """
 
-    # 提取坐标和位移数据
+    # Extract coordinate and displacement data
     R1, Z1 = R1mat[mask1].flatten(), Z1mat[mask1].flatten()
     R2, Z2 = R2mat[mask2].flatten(), Z2mat[mask2].flatten()
     R3, Z3 = R3mat[mask3].flatten(), Z3mat[mask3].flatten()
@@ -274,14 +126,14 @@ def displacement_combined_four_regions(
     Ur4_masked = Ur4[mask4.flatten()]
     Uz4_masked = Uz4[mask4.flatten()]
 
-    # 合并
+    # merge
     R_all = np.concatenate([R1, R2, R3, R4])
     Z_all = np.concatenate([Z1, Z2, Z3, Z4])
     Ur_all = np.concatenate([Ur1_masked, Ur2_masked, Ur3_masked, Ur4_masked])
     Uz_all = np.concatenate([Uz1_masked, Uz2_masked, Uz3_masked, Uz4_masked])
     U_all = np.sqrt(Ur_all**2 + Uz_all**2)
 
-    # 网格
+    # grid
     r_min, r_max = np.min(R_all), np.max(R_all)
     z_min, z_max = np.min(Z_all), np.max(Z_all)
     r_lin = np.linspace(r_min, r_max, 300)
@@ -293,11 +145,11 @@ def displacement_combined_four_regions(
     Uz_grid = griddata(points, Uz_all, (R_grid, Z_grid), method='linear')
     U_grid  = griddata(points, U_all,  (R_grid, Z_grid), method='linear')
 
-    # 图像范围
+    # Image range
     r_display_max = Lr1 + Lr4
     z_display_max = Lz1 + Lz2
 
-    # --- 绘图 ---
+     # --- Drawing ---
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     def draw_subplot(ax, data_grid, title_base, unit_label):
