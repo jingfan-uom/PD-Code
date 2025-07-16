@@ -68,29 +68,26 @@ def generate_coordinates(
 
     return r_all, z_all, Nr_tot, Nz_tot
 
-
-import numpy as np
-
 def generate_quarter_circle_coordinates(
     dr, R, Nr, ghost_nodes_r,
     r_ghost_left, z_ghost_bot,
     quarter_circle
 ):
     """
-    先生成包含ghost区在内的r_all, z_all（范围到R1），
-    再用mask处理物理区和ghost区点。
+    Generate r_all and z_all
+    including the ghost area, and then use mask to process the physical area and ghost area points.
     """
 
     if quarter_circle:
-        # 1. r_all 和 z_all (中心对齐)
+        # 1. r_all 和 z_all  (Center aligned)
         r_all = np.linspace(-ghost_nodes_r * dr + dr / 2, R + dr / 2 + (ghost_nodes_r - 1) * dr, Nr + 2 * ghost_nodes_r)
         z_all = np.linspace(R +(ghost_nodes_r - 1) * dr + dr / 2, -ghost_nodes_r * dr + dr / 2, Nr + 2 * ghost_nodes_r)
 
-        # 2. 生成全网格
+         # 2. Generate the entire grid
         rr, zz = np.meshgrid(r_all, z_all, indexing='xy')
         coords_all = np.column_stack([rr.ravel(), zz.ravel()])
 
-        # 3. 物理区mask (只对r,z都>=0 且 r^2+z^2<=R^2)
+       # 3. Physical zone mask (only for r, z both >= 0 and r^2+z^2 <= R^2)
         mask_phys = (
                 (coords_all[:, 0] >= 0) & (coords_all[:, 1] >= 0) &
                 (coords_all[:, 0] < R) & (coords_all[:, 1] < R) &
@@ -98,20 +95,20 @@ def generate_quarter_circle_coordinates(
         )
         coords_phys = coords_all[mask_phys]
 
-        # 4. ghost区左
+        # 4. Ghost Zone Left
         coords_ghost_left = np.empty((0, 2))
         if r_ghost_left :
             mask_ghost_left = (coords_all[:, 0] < 0) & (coords_all[:, 1] > 0)
             coords_ghost_left = coords_all[mask_ghost_left]
 
-        # 5. ghost区下
+         # 5. Ghost Zone
         coords_ghost_bot = np.empty((0, 2))
         if z_ghost_bot :
             mask_ghost_bot = coords_all[:, 1] < 0
             #Note that here I have placed the lower left corner on the lower edge of the grain area.
             coords_ghost_bot = coords_all[mask_ghost_bot]
 
-        # 6. quarter_circle ghost区（圆环）
+        # 6. quarter_circle ghost
         coords_ghost_circle = np.empty((0, 2))
         mask_circle = (
                 (coords_all[:, 0] >= 0) & (coords_all[:, 1] >= 0) &
@@ -121,17 +118,17 @@ def generate_quarter_circle_coordinates(
         coords_ghost_circle = coords_all[mask_circle]
 
     else:
-        # 1. r_all 和 z_all (中心对齐)
+        # 1. r_all 和 z_all 
         R1 = R + ghost_nodes_r * dr
         Z1 = R + ghost_nodes_r * dr
         r_all = np.linspace(-ghost_nodes_r * dr + dr / 2, R - dr / 2, Nr + ghost_nodes_r)
         z_all = np.linspace(r - dr / 2, -ghost_nodes_r * dr + dr / 2, Nr + ghost_nodes_r)
 
-        # 2. 生成全网格
+        # 2. Generate the entire grid
         rr, zz = np.meshgrid(r_all, z_all, indexing='ij')
         coords_all = np.column_stack([rr.ravel(), zz.ravel()])
 
-        # 3. 物理区mask (只对r,z都>=0 且 r^2+z^2<=R^2)
+        # 3. Physical zone mask (only for r, z both >= 0 and r^2+z^2 <= R^2)
         mask_phys = (
                 (coords_all[:, 0] >= 0) & (coords_all[:, 1] >= 0) &
                 (coords_all[:, 0] < R) & (coords_all[:, 1] < R) &
@@ -139,14 +136,13 @@ def generate_quarter_circle_coordinates(
         )
         coords_phys = coords_all[mask_phys]
 
-        # 4. ghost区左
+        # 4. Ghost Zone Left
         coords_ghost_left = np.empty((0, 2))
         if r_ghost_left:
             mask_ghost_left = (coords_all[:, 0] < 0) & (coords_all[:, 1] > 0)
             coords_ghost_left = coords_all[mask_ghost_left]
 
-        # 5. ghost区下
-        coords_ghost_bot = np.empty((0, 2))
+              coords_ghost_bot = np.empty((0, 2))
         if z_ghost_bot:
             mask_ghost_bot = coords_all[:, 1] < 0
             # Note that here I have placed the lower left corner on the lower edge of the grain area.
