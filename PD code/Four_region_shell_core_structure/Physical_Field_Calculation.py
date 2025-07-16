@@ -51,10 +51,10 @@ def compute_Tensor_product(x, y, horizon_mask):
 
     for i in range(N):
         for j in range(N):
-            # 只对有效（horizon_mask为True）的键计算
+           # Calculate only valid keys (horizon_mask is True)
             if horizon_mask[i, j]:
-                n_vec = np.array([n_x[i, j], n_z[i, j]])  # 组成二维单位向量
-                n_outer = np.outer(n_vec, n_vec)  # 2x2张量积
+                n_vec = np.array([n_x[i, j], n_z[i, j]])  # Forming two-dimensional unit vectors
+                n_outer = np.outer(n_vec, n_vec)   # 2x2 tensor product
 
                 Cxx[i, j] = n_outer[0, 0]
                 Cxz[i, j] = n_outer[0, 1]
