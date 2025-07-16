@@ -1,7 +1,4 @@
 import numpy as np
-
-import numpy as np
-
 tol= 1e-8
 def robust_key(r, z):
     return (round(r / tol * tol), round(z / tol * tol))
@@ -34,7 +31,7 @@ def get_coarse_neighbor_points(
             r = Rmat_coarse[i_z_coarse, i_r_coarse]
             z = Zmat_coarse[i_z_coarse, i_r_coarse]
 
-            # 四个相邻细网格点的坐标
+            # Coordinates of four adjacent fine grid points
             neighbors = [
                 (r - dr_fine / 2, z - dz_fine / 2),
                 (r - dr_fine / 2, z + dz_fine / 2),
@@ -55,7 +52,7 @@ def get_coarse_neighbor_points(
     print("Sample mapping from coarse points to fine neighbors:\n")
     for i, (coarse_idx, fine_list) in enumerate(coarse2fine_indices.items()):
         print(f"Coarse point {coarse_idx} maps to fine points: {fine_list}")
-        if i >= 4:  # 只打印前5个
+        if i >= 4:  # Print only the first 5
               break
 
     return coarse2fine_indices
@@ -67,7 +64,7 @@ def interpolate_temperature_for_coarse(
         coarse2fine_indices: dict
 ) -> np.ndarray:
     """
-    对 coarse 网格中的 ghost 点，根据 fine 网格温度进行插值。
+    For ghost points in the coarse grid, interpolate based on the fine grid temperature.
     coarse2fine_indices: dict[(row_coarse, col_coarse)] = [(z1, r1), (z2, r2), ...]
     """
     T_result = T_coarse.copy()
@@ -112,7 +109,7 @@ def get_fine_neighbor_points(
             r_fine = Rmat_fine[i_z_fine, i_r_fine]
             z_fine = Zmat_fine[i_z_fine, i_r_fine]
 
-            # 寻找 coarse 点
+            # Searching for coarse points
             dists = np.sqrt((coords_flat[:, 0] - r_fine)**2 + (coords_flat[:, 1] - z_fine)**2)
             nearby_mask = (dists <= radius)
             nearby_coords = coords_flat[nearby_mask]
@@ -146,7 +143,7 @@ def interpolate_temperature_for_fine(
         fine2coarse_indices: dict
 ) -> np.ndarray:
     """
-    对 fine 网格中的 ghost 点，根据 coarse 网格温度进行插值。
+    For ghost points in the fine grid, interpolate based on the coarse grid temperature.
     fine2coarse_indices: dict[(row_fine, col_fine)] = [(z1, r1), (z2, r2), ...]
     """
     T_result = T_fine.copy()
@@ -183,7 +180,7 @@ def get_exact_neighbor_points_same_spacing(
             r = Rmat[i_z_src, i_r_src]
             z = Zmat[i_z_src, i_r_src]
 
-            # 在目标网格中查找完全对应的点
+            # Find the corresponding point in the target grid
             try:
                 i_r_tgt = np.where(np.abs(r_all_target - r) < tol)[0][0]
                 i_z_tgt = np.where(np.abs(z_all_target - z) < tol)[0][0]
