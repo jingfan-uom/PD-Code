@@ -18,20 +18,20 @@ matplotlib.use('TkAgg')  # 或者试试 'Qt5Agg'
 # ------------------------
 # Physical and simulation parameters
 # ------------------------
-rho_s = 897.6           # 密度 [kg/m³]
-Lr, Lz = 0.05, 0.05        # 模型区域尺寸 (m)
-Nr, Nz = 106, 106          # 网格数量
-dr, dz = Lr / Nr, Lz / Nz  # 单元尺寸
-E = 5.5e9                  # 冰的杨氏模量 (Pa)
-nu = 1/4                   # 泊松比
-KI = 134e3                 # 断裂韧性 N/m^1.5
-G0 = KI**2 / E             # 能量释放率 (J/m²)
-alpha = 1.8e-5             # 热膨胀系数 [1/K]（如不确定可保留原值）
-delta = 3 * dr         # 非局部作用范围
+rho_s = 897.6           # Density  [kg/m³]
+Lr, Lz = 0.05, 0.05        # Model domain dimensions (m)
+Nr, Nz = 106, 106          # Number of grid cells
+dr, dz = Lr / Nr, Lz / Nz  # Element size
+E = 5.5e9                  # Young's modulus of ice (Pa)
+nu = 1/4                   # Poisson's ratio
+KI = 134e3                 # Fracture toughness N/m^1.5
+G0 = KI**2 / E             # Energy release rate (J/m²)
+alpha = 1.8e-5             # Thermal expansion coefficient [1/K] 
+delta = 3 * dr         # Non-local interaction range
 ghost_nodes_x = 3
 ghost_nodes_z = 3
 h = 1
-# 使用公式 (2-82) 重新计算裂纹起裂应力 s0
+# Use formula to recalculate the crack initiation stress s0.
 s0 = np.sqrt(5 * np.pi * G0 / (18 * E * delta))
 # ------------------------
 # Construct grid coordinates (including ghost layers)
@@ -203,12 +203,12 @@ for step1 in range(nsteps_m):
         dir_r, dir_z, c_matrix, partial_area_matrix_m, rho_s, s0
     )
 
-    # 第一步：更新位移和半步速度
+    # Step 1: Update displacement and half-step speed
     Ur, Uz, Vr_half, Vz_half = compute_next_displacement_field_jit(
         Ur, Uz, Vr, Vz, Ar, Az, dt_m
     )
 
-    # 第二步：更新全步速度和加速度
+    # Step 2: Update the full step speed and acceleration
     Vr, Vz, Ar, Az = compute_next_velocity_third_step_jit(
         Vr_half, Vz_half, Ur, Uz, dt_m,
         mu,
@@ -227,7 +227,7 @@ for step1 in range(nsteps_m):
     if step1 % 10 == 0:
         print(f"Computed up to {step1 * dt_m:.2e} seconds (step {step1})")
         mask = phi >= 0.5
-        # 用 mask 取出对应的 r 坐标
+       # Use mask to extract the corresponding r coordinates
         r_selected = Rmat_m[mask]
         if r_selected.size > 0:
             result = np.max(r_selected) - 0.03
@@ -255,7 +255,7 @@ desktop = os.path.expanduser("~/Desktop")
 save_path = os.path.join(desktop, "r_vs_time.csv")
 np.savetxt(save_path, data, delimiter=',', header="time,r", comments='')
 
-print(f"数据已保存到: {save_path}")
+print(f“Data saved to: {save_path}”)
 
 end_time = time.time()
 print(f"Calculation finished, elapsed real time = {end_time - start_time:.2f}s")
