@@ -12,7 +12,7 @@ import ADR
 import generate_coordinates as gc
 import grid_generator_rectangle as gg
 import matplotlib
-matplotlib.use('TkAgg')  # 或尝试 'QtAgg' 如果 TkAgg 报错
+matplotlib.use('TkAgg')  # Or try ‘QtAgg’ if TkAgg reports an error.
 
 # ------------------------
 # Physical and simulation parameters
@@ -64,7 +64,7 @@ if not np.isclose(dr4, dz4):
 r1_start, z1_start = 0.0, 0.0
 r2_start, z2_start = 0.0, z1_start + Lz1
 r3_start, z3_start = r1_start + Lr1, z1_start + Lz1
-r4_start, z4_start = r1_start + Lr1, 0.0  # ← 新区域右边紧接 r3
+r4_start, z4_start = r1_start + Lr1, 0.0 
 
 delta1, delta2, delta3, delta4 = 3 * dr1, 3 * dr2, 3 * dr3, 3 * dr4
 
@@ -216,9 +216,9 @@ dt1_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks,partial_area_matrix1_
 dt2_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks,partial_area_matrix2_th, horizon_mask2_th, distance_matrix2_th, delta2) * 0.8
 dt3_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks,partial_area_matrix3_th, horizon_mask3_th, distance_matrix3_th, delta3) * 0.8
 dt4_th = cf.compute_dt_cr_th_solid_with_dist(rho_s, cs, ks,partial_area_matrix4_th, horizon_mask4_th, distance_matrix4_th, delta4) * 0.8
-# 取最小值
+# Take the minimum value
 dt_min = min(dt1_th, dt2_th, dt3_th, dt4_th)
-# 所有时间步长统一为最小值
+# All time steps are unified to the minimum value.
 dt1_th = dt2_th = dt3_th = dt4_th = dt_min
 
 # Region 1
@@ -523,21 +523,20 @@ for step1 in range(nsteps_th):
         Uz1 = gg.interpolate_temperature_for_coarse(Uz1, Uz2, coord_index1_top_m)
         Ur1 = gg.interpolate_temperature_for_coarse(Ur1, Ur4, coord_index1_right_m)
         Uz1 = gg.interpolate_temperature_for_coarse(Uz1, Uz4, coord_index1_right_m)
-        # Region 2（粗网格）：使用从 Ur1（粗）和 Ur3（细）补充边界
+       
         Ur2 = gg.interpolate_temperature_for_coarse(Ur2, Ur1, coord_index2_bot_m)  # fine → coarse
         Uz2 = gg.interpolate_temperature_for_coarse(Uz2, Uz1, coord_index2_bot_m)
 
         Ur2 = gg.interpolate_temperature_for_coarse(Ur2, Ur3, coord_index2_right_m)  # fine → coarse
         Uz2 = gg.interpolate_temperature_for_coarse(Uz2, Uz3, coord_index2_right_m)
 
-        # Region 3（细网格）：使用 Ur2（粗）和 Ur4（粗）
+        
         Ur3 = gg.interpolate_temperature_for_fine(Ur3, Ur2, coord_index3_left_m)  # coarse → fine
         Uz3 = gg.interpolate_temperature_for_fine(Uz3, Uz2, coord_index3_left_m)
 
         Ur3 = gg.interpolate_temperature_for_fine(Ur3, Ur4, coord_index3_bot_m)  # coarse → fine
         Uz3 = gg.interpolate_temperature_for_fine(Uz3, Uz4, coord_index3_bot_m)
 
-        # Region 4（粗网格）：使用 Ur1（粗）和 Ur3（细）
         Ur4 = gg.interpolate_temperature_for_coarse(Ur4, Ur1, coord_index4_left_m)  # fine → coarse
         Uz4 = gg.interpolate_temperature_for_coarse(Uz4, Uz1, coord_index4_left_m)
 
@@ -560,9 +559,7 @@ for step1 in range(nsteps_th):
     for step2 in range(nsteps_m):
         if step2 % 10 == 0:
             print(f"Step {step2}")
-        # 这里是你的主计算逻辑
-
-            # 这里是你的主计算逻辑
+      
         previous_Ur1, previous_Uz1 = Ur1.copy(), Uz1.copy()
         previous_Ur2, previous_Uz2 = Ur2.copy(), Uz2.copy()
         previous_Ur3, previous_Uz3 = Ur3.copy(), Uz3.copy()
@@ -623,21 +620,21 @@ for step1 in range(nsteps_th):
         Uz1 = gg.interpolate_temperature_for_coarse(Uz1, Uz2, coord_index1_top_m)
         Ur1 = gg.interpolate_temperature_for_coarse(Ur1, Ur4, coord_index1_right_m)
         Uz1 = gg.interpolate_temperature_for_coarse(Uz1, Uz4, coord_index1_right_m)
-        # Region 2（粗网格）：使用从 Ur1（粗）和 Ur3（细）补充边界
+         # Region 2 (coarse grid): Use Ur1 (coarse) and Ur3 (fine) to supplement the boundary.
         Ur2 = gg.interpolate_temperature_for_coarse(Ur2, Ur1, coord_index2_bot_m)  # fine → coarse
         Uz2 = gg.interpolate_temperature_for_coarse(Uz2, Uz1, coord_index2_bot_m)
 
         Ur2 = gg.interpolate_temperature_for_coarse(Ur2, Ur3, coord_index2_right_m)  # fine → coarse
         Uz2 = gg.interpolate_temperature_for_coarse(Uz2, Uz3, coord_index2_right_m)
 
-        # Region 3（细网格）：使用 Ur2（粗）和 Ur4（粗）
+       # Region 3 (fine grid): Use Ur2 (coarse) and Ur4 (coarse)
         Ur3 = gg.interpolate_temperature_for_fine(Ur3, Ur2, coord_index3_left_m)  # coarse → fine
         Uz3 = gg.interpolate_temperature_for_fine(Uz3, Uz2, coord_index3_left_m)
 
         Ur3 = gg.interpolate_temperature_for_fine(Ur3, Ur4, coord_index3_bot_m)  # coarse → fine
         Uz3 = gg.interpolate_temperature_for_fine(Uz3, Uz4, coord_index3_bot_m)
 
-        # Region 4（粗网格）：使用 Ur1（粗）和 Ur3（细）
+        # Region 4 (coarse grid): Use Ur1 (coarse) and Ur3 (fine)
         Ur4 = gg.interpolate_temperature_for_coarse(Ur4, Ur1, coord_index4_left_m)  # fine → coarse
         Uz4 = gg.interpolate_temperature_for_coarse(Uz4, Uz1, coord_index4_left_m)
 
@@ -653,7 +650,7 @@ for step1 in range(nsteps_th):
         Ur4 = Ur4.flatten();
         Uz4 = Uz4.flatten()
         # dir_r, dir_z = pfc.compute_direction_matrix(r_flat_m, z_flat_m, Ur, Uz, horizon_mask_m)
-        # 计算当前位移增量的RMS
+         # Calculate the RMS of the current displacement increment
         U1 = np.sqrt(Ur1 ** 2 + Uz1 ** 2);
         U1_prev = np.sqrt(previous_Ur1 ** 2 + previous_Uz1 ** 2)
         U2 = np.sqrt(Ur2 ** 2 + Uz2 ** 2);
@@ -734,14 +731,14 @@ plot.displacement_combined_four_regions(
     Lr1, Lr4, Lz1, Lz2,
     total_time=nsteps_m*dt1_m,
     nsteps=nsteps_m,
-    levels=np.linspace(-1e-6, 1e-6, 100)  # 或根据最大位移自动设置
+    levels=np.linspace(-1e-6, 1e-6, 100) # Or automatically set according to the maximum displacement
 )
 
 
 """
 U = np.sqrt(Ur**2 + Uz**2)
 
-area_matrix_m = partial_area_matrix_m.copy()  # 避免影响原数组
+area_matrix_m = partial_area_matrix_m.copy()   # Avoid affecting the original array
 np.fill_diagonal(area_matrix_m, 0)
 phi = 1 - np.sum(mu * area_matrix_m, axis=1) / np.sum(area_matrix_m, axis=1)
 phi = phi.reshape(Rmat_m.shape)
