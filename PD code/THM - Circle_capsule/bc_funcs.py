@@ -90,21 +90,21 @@ def get_same_neighbor_points(
     tol: float = 1e-12
 ):
     """
-    查找 ghost 点和 phys 点在 r-z 坐标上是否完全匹配（忽略 layer_id）。
+    Check whether ghost points and phys points are exactly matched in the r-z coordinates (ignoring layer_id).
 
-    参数:
-        ghost_coords: shape=(N1, 3)，包括 r, z, layer_id
-        phys_coords: shape=(N2, 3)，包括 r, z, layer_id
-        tol: 允许的坐标容差
+    Parameters:
+        ghost_coords: shape=(N1, 3), including r, z, layer_id
+        phys_coords: shape=(N2, 3), including r, z, layer_id
+        tol: Allowable coordinate tolerance
 
-    返回:
-        ghost_indices: ghost 中的匹配点索引
-        phys_indices: phys 中对应的匹配点索引
+    Returns:
+        ghost_indices: indices of matching points in ghost
+        phys_indices: indices of corresponding matching points in phys
     """
     ghost_indices = []
     phys_indices = []
 
-    # 只取 r 和 z 坐标进行匹配
+    # Match only r and z coordinates
     ghost_rz = ghost_coords[:, :2]
     phys_rz = phys_coords[:, :2]
 
@@ -127,13 +127,13 @@ def get_fine_neighbor_points(
     dr_fine: float,
     tol: float = 1e-12
 ):
-    ghost_indices = []          # ghost 点的指引
-    phys_indices = []      # 每个 ghost 对应的物理点指引列表
+    ghost_indices = []          # ghost Point guidance
+    phys_indices = []      # List of physical point guides corresponding to each ghost
 
     for i, g in enumerate(ghost_coords):
         r, z = g
 
-        # 构建 ghost 点周围的 4 个目标物理点坐标
+        # Construct the coordinates of the four target physical points surrounding the ghost point.
         neighbor_targets = np.array([
             [r - dr_fine / 2, z - dr_fine / 2],
             [r - dr_fine / 2, z + dr_fine / 2],
@@ -149,7 +149,7 @@ def get_fine_neighbor_points(
             if idx.size == 1:
                 matched_indices.append(idx[0])
             elif idx.size == 0:
-                continue  # 不匹配就跳过
+                continue  
             else:
                 raise ValueError(f"Target {target} matched multiple physical points: {idx}")
 
@@ -177,7 +177,7 @@ def get_coarse_neighbor_points(
     for i, g in enumerate(ghost_coords):
         r_fine, z_fine = g
 
-        # 计算每个 coarse 点到 ghost 点的距离
+        # Calculate the distance from each coarse point to the ghost point
         dists = np.sqrt((phys_coords[:, 0] - r_fine)**2 + (phys_coords[:, 1] - z_fine)**2)
         nearby_mask = dists <= radius
         nearby_indices = np.where(nearby_mask)[0]
@@ -197,7 +197,7 @@ def interpolate_temperature_for_coarse_and_fine(
     T_result = T_ghost.copy()
 
     for i, g_idx in enumerate(ghost_indices):
-        p_list = phys_indices[i]  # 现在默认是 list/tuple/array
+        p_list = phys_indices[i]  
         T_result[g_idx] = np.mean([T_fine[j] for j in p_list])
 
     return T_result
@@ -211,7 +211,7 @@ def interpolate_temperature_for_same(
 
     T_result = T_ghost.copy()
     for i, g_idx in enumerate(ghost_indices):
-        p_idx = phys_indices[i]  # 是单个整数
+        p_idx = phys_indices[i]  
         T_result[g_idx] = T_phys[p_idx]
 
     return T_result
