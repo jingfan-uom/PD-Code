@@ -1,3 +1,4 @@
+
 import generate_coordinates as gc
 import numpy as np
 from multiprocessing import Pool, cpu_count
@@ -10,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import griddata
 
-# Physical and thermal parameters
 rho_s, cs, ks = 1000.0, 2060.0, 1
 rho_l, cl, kl = 1000.0, 4182.0, 0.6
 Ts = 312.65
@@ -19,10 +19,10 @@ L = 333
 tolerance = 1e-14
 Tsurr = 400
 Tinit = 283.15
-
-# Initialization of coarse regions and temperatures
+""" Initialization of coarse regions and temperatures """
 # dr1, dr2, dr3 are used to generate regional particle density by calling functions to create coordinates.
-r = 20 * 1e-6  # Domain radius in meters
+r = 20 * 1e-6  # Domain size in r and z directions (meters)
+
 dr1 = 0.05 * 1e-6
 dr2 = 0.05 * 1e-6
 dr3 = 2 * dr2
@@ -32,16 +32,17 @@ len1 = 0.5 * 1e-6
 len2 = 0.5 * 1e-6
 len3 = 1 * 1e-6
 
-ghost_nodes_r = 3  # Number of ghost cells in the r direction
+ghost_nodes_r = 3  # Number of ghost cells in the x (or r) direction
 n_slices = 8
-num_processes = 4
-dt = 1e-8  # Time step (s)
-total_time = 100e-8  # Total simulation time (s)
-
+num_processes = 1
+dt = 1e-8  # Time step in seconds
+total_time = 100e-8  # Total simulation time (5 hours)
+# ------------------------
+# Compute distance matrix and horizon mask
+# ------------------------
 if __name__ == "__main__":
     start_time2 = time.time()
-
-    # 1. Define regional coordinates and compute area matrices
+    """1. Definition of regional coordinates and area matrix """
     zones = gc.compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3)
 
     for z in zones:
@@ -54,11 +55,11 @@ if __name__ == "__main__":
     start_time = time.time()
 
     for i in range(n_slices):
-        zone = zones[i]
+        zone = zones[i]  # 获取当前层的配置
         dr_i = zone["dr"]
         Nr_i = zone["Nr"]
 
-        coords_phys, ghost_coords, n_points, ghost_dict = gc.generate_one_slice_coordinates(
+        coords_phys, ghost_coords, n_points,ghost_dict = gc.generate_one_slice_coordinates(
             r, Nr_i, ghost_nodes_r,
             zones,
             r_ghost_left=True,
@@ -85,10 +86,13 @@ if __name__ == "__main__":
         slice_id = zones[i]["layer"]
         task_args.append((coords, dr, delta, tolerance, slice_id))
 
+    # ✅ You can use serial computation (the simplest method and avoids process isolation issues).
     if num_processes == 1:
+        # serial computation
         results = [mt.compute_region_matrices(args) for args in task_args]
     else:
-        with Pool(processes=num_processes) as pool:
+        # Multi-process execution
+        with Pool(processes= num_processes) as pool:
             results = pool.map(mt.compute_region_matrices, task_args)
 
     distance_matrices = []
@@ -105,3 +109,385 @@ if __name__ == "__main__":
 
     end_time = time.time()
     print(f"Calculation of partial_area_matrices finished, elapsed real time = {end_time - start_time:.2f}s")
+
+
+    """2. Definition of particle information at the interface between regions """
+    # Initialize structured dictionary
+    ghost_top = {}
+    ghost_bot = {}
+    ghost_left = {}
+    ghost_right = {}
+    phys = {}
+
+    # Iterate through each region
+    for i in range(n_slices):
+        ghost_top[i] = ghost_dict_list[i]["top"]
+        ghost_bot[i] = ghost_dict_list[i]["bot"]
+        ghost_left[i] = ghost_dict_list[i]["left"]
+        ghost_right[i] = ghost_dict_list[i]["right"]
+        phys[i] = phys_coords_list[i]
+
+    # Save the matching relationship between each pair of adjacent regions
+    boundary_neighbors = {}
+
+    for i in range(n_slices):  # Region i is adjacent to region i+1 (in the vertical direction)
+        # The lower boundary (bot) ghost point of region i corresponds to the physical point of region i+1.
+        if i <= n_slices - 2:
+            dr_i = zones[i]["dr"]
+            dr_ip1 = zones[i + 1]["dr"]
+            ghost_coords_bot = ghost_bot[i][:, :2]
+            phys_coords_ip1 = phys[i + 1][:, :2]
+
+            if abs(dr_i - dr_ip1) < tolerance:
+                ghost_idx_bot, phys_idx_bot = bc.get_same_neighbor_points(
+                    ghost_coords_bot, phys_coords_ip1, tol=tolerance)
+            elif dr_i < dr_ip1:
+                ghost_idx_bot, phys_idx_bot = bc.get_coarse_neighbor_points(
+                    ghost_coords_bot, phys_coords_ip1, dr_fine=dr_i, tol=tolerance)
+            else:  # dr_i > dr_ip1
+                ghost_idx_bot, phys_idx_bot = bc.get_fine_neighbor_points(
+                    ghost_coords_bot, phys_coords_ip1, dr_fine=dr_ip1, tol=tolerance)
+            # Store the structured result dictionary, indicating that it is the lower bound of region i.
+            boundary_neighbors[(i, 'bot')] = {
+                "ghost_indices": ghost_idx_bot,
+                "phys_indices": phys_idx_bot,
+                "target_region": i + 1
+            }
+        # Symmetrically handle the upper boundary ghost points of the i+1 region
+            ghost_coords_top = ghost_top[i + 1][:, :2]
+            phys_coords_i = phys[i][:, :2]
+            if abs(dr_i - dr_ip1) < tolerance:
+                ghost_idx_top, phys_idx_top = bc.get_same_neighbor_points(ghost_coords_top, phys_coords_i,
+                                                                                  tol=tolerance)
+            elif dr_ip1 < dr_i:
+                ghost_idx_top, phys_idx_top = bc.get_coarse_neighbor_points(ghost_coords_top, phys_coords_i,
+                                                                                    dr_fine=dr_ip1, tol=tolerance)
+            else:
+                ghost_idx_top, phys_idx_top = bc.get_fine_neighbor_points(ghost_coords_top, phys_coords_i,
+                                                                                  dr_fine=dr_i, tol=tolerance)
+            boundary_neighbors[(i + 1, 'top')] = {
+                "ghost_indices": ghost_idx_top,
+                "phys_indices": phys_idx_top,
+                "target_region": i
+            }
+
+        coords_ghost_left = ghost_left[i][:, :2]
+        coords_ghost_right = ghost_right[i][:, :2]
+        coords_phys = phys[i][:, :2]
+        dr = zones[i]["dr"]
+
+        # Left boundary: Line symmetry mirror image about r=0
+        ghost_idx_left, phys_idx_left = bc.find_mirror_pairs(
+            coords_ghost_left, coords_phys, tolerance
+        )
+        boundary_neighbors[(i, 'left')] = {
+            "ghost_indices": ghost_idx_left,
+            "phys_indices": phys_idx_left,
+            "target_region": i  # Left and right boundaries are within their own regions
+        }
+
+        # Right boundary: Circular symmetry mirror image about the center of the circle
+        ghost_idx_right, phys_idx_right = bc.find_circle_mirror_pairs_multilayer(
+            coords_ghost_right, coords_phys, dr, r
+        )
+        boundary_neighbors[(i, 'right')] = {
+            "ghost_indices": ghost_idx_right,
+            "phys_indices": phys_idx_right,
+            "target_region": i
+        }
+
+
+    """3. Definition of temperature """
+    T_phys = {}
+    T_left = {}
+    T_right = {}
+    T_top = {}
+    T_bot = {}
+    factor_mats = {}
+
+    for i in range(n_slices):
+
+        dr = zones[i]["dr"]
+        coords_phys = phys[i][:, :2]
+        coords_ghost_left = ghost_left[i][:, :2]
+        coords_ghost_right = ghost_right[i][:, :2]
+        coords_ghost_top = ghost_top[i][:, :2]
+        coords_ghost_bot = ghost_bot[i][:, :2]
+        distance_matrix = distance_matrices[i]
+
+        # 1. Factor matrix
+        threshold_distance = np.sqrt(2) * dr
+        factor_mats[i] = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)
+
+        # 2. Initialize the physical temperature field (different initial temperatures within the region)
+        T_phys[i] = np.full(coords_phys.shape[0], Tinit)
+
+        # 3. Initialize the ghost temperature field
+        T_left[i] = np.full(coords_ghost_left.shape[0], Tinit)
+        T_right[i] = np.full(coords_ghost_right.shape[0], Tsurr)
+        T_top[i] = np.full(coords_ghost_top.shape[0], Tinit)
+        T_bot[i] = np.full(coords_ghost_bot.shape[0], Tinit)
+
+    for (region_id, direction), neighbor_data in boundary_neighbors.items():
+        ghost_indices = neighbor_data["ghost_indices"]
+        phys_indices = neighbor_data["phys_indices"]
+        target_region = neighbor_data["target_region"]
+
+        # Direct processing of left and right boundaries
+        if direction in ['left', 'right']:
+            if direction == 'left':
+                T_left[region_id][ghost_indices] = T_phys[region_id][phys_indices]
+            else:
+                T_right[region_id][ghost_indices] = 2 * Tsurr - T_phys[region_id][phys_indices]
+
+        # Upper and lower boundary interpolation processing
+        elif direction in ['top', 'bot']:
+
+            dr1 = zones[region_id]["dr"]
+            dr2 = zones[target_region]["dr"]
+
+            if abs(dr1 - dr2) < tolerance:
+                if direction == 'top':
+                    T_top[region_id] = bc.interpolate_temperature_for_same(
+                        T_top[region_id],
+                        T_phys[target_region],
+                        ghost_indices,
+                        phys_indices
+                    )
+                else:
+                    T_bot[region_id] = bc.interpolate_temperature_for_same(
+                        T_bot[region_id],
+                        T_phys[target_region],
+                        ghost_indices,
+                        phys_indices
+                    )
+            else:
+                if direction == 'top':
+                    T_top[region_id] = bc.interpolate_temperature_for_coarse_and_fine(
+                        T_top[region_id],
+                        T_phys[target_region],
+                        ghost_indices,
+                        phys_indices
+                    )
+                else:
+                    T_bot[region_id] = bc.interpolate_temperature_for_coarse_and_fine(
+                        T_bot[region_id],
+                        T_phys[target_region],
+                        ghost_indices,
+                        phys_indices
+                    )
+    """3. Definition of enthalpy """
+    T = {}
+    H = {}
+    K = {}
+    shape_factor_matrices = {}
+    region_lengths = {}  # Used to store length information for each region
+
+    for i in range(n_slices):
+        # Get the current temperature array for each region
+        T_p = T_phys[i]
+        T_l = T_left.get(i, np.array([]))
+        T_r = T_right.get(i, np.array([]))
+        T_t = T_top.get(i, np.array([]))
+        T_b = T_bot.get(i, np.array([]))
+
+        # Segment length
+        n_phys = len(T_p)
+        n_left = len(T_l)
+        n_right = len(T_r)
+        n_top = len(T_t)
+        n_bot = len(T_b)
+
+        # Total temperature field of the patchwork
+        T[i] = np.concatenate([T_p, T_l, T_r, T_t, T_b])
+        delta = zones[i]["delta"]
+
+        # Save the length information for each segment
+        region_lengths[i] = {
+            'n_phys': n_phys,
+            'n_left': n_left,
+            'n_right': n_right,
+            'n_top': n_top,
+            'n_bot': n_bot
+        }
+
+        H[i] = cf.get_enthalpy(T[i], rho_l, cs, cl, L, Ts, Tl)
+        shape_factor_matrices[i] = np.ones_like(horizon_masks[i], dtype=float)
+        K[i] = cf.build_K_matrix(
+            T[i],
+            cf.compute_thermal_conductivity_matrix,
+            factor_mats[i],
+            partial_area_matrices[i],
+            shape_factor_matrices[i],
+            distance_matrices[i],
+            horizon_masks[i],
+            true_indices_list[i],
+            ks, kl, Ts, Tl, delta, dt
+        )
+
+    # Build initial conductivity matrix
+
+
+
+    nsteps = int(total_time / dt)
+    print_interval = int(10 / dt)  # Print progress every 10 simulated seconds
+    print(f"Total steps: {nsteps}")
+    start_time = time.time()
+
+    # ------------------------
+    # Time-stepping loop
+    # ------------------------
+    save_times = [2, 4, 6, 8, 10]  # Save snapshots (in hours)
+    save_steps = [int(t * 3600 / dt) for t in save_times]
+    T_record = []  # Store temperature snapshots
+
+    for step in range(nsteps):
+        if (step + 1) % 10 == 0:
+            print(f"✅ Completed {step + 1} steps of calculation")
+
+        task_args = []
+        for i in range(n_slices):
+            delta = zones[i]["delta"]
+            lengths = region_lengths[i]
+            args = (
+                i,
+                T[i],
+                H[i],
+                K[i],
+                factor_mats[i],
+                partial_area_matrices[i],
+                shape_factor_matrices[i],
+                distance_matrices[i],
+                horizon_masks[i],
+                true_indices_list[i],
+                delta,
+                dt,
+                rho_s, cs, cl, L, Ts, Tl, ks, kl
+            )
+            task_args.append(args)
+
+        if num_processes == 1:
+            # Serial execution
+            results = [mt.update_temperature_for_region(args) for args in task_args]
+        else:
+            # Parallel execution
+            with Pool(processes=num_processes) as pool:
+                results = pool.map(mt.update_temperature_for_region, task_args)
+
+        # ✅ Split results
+        for region_id, Tnew, Hnew, Knew in results:
+            lengths = region_lengths[region_id]
+            n_phys = lengths["n_phys"]
+            n_left = lengths["n_left"]
+            n_right = lengths["n_right"]
+            n_top = lengths["n_top"]
+            n_bot = lengths["n_bot"]
+
+            T_phys[region_id] = Tnew[:n_phys]
+            T_left[region_id] = Tnew[n_phys: n_phys + n_left]
+            T_right[region_id] = Tnew[n_phys + n_left: n_phys + n_left + n_right]
+            T_top[region_id] = Tnew[n_phys + n_left + n_right: n_phys + n_left + n_right + n_top]
+            T_bot[region_id] = Tnew[n_phys + n_left + n_right + n_top:]
+
+            T[region_id] = np.concatenate(
+                [T_phys[region_id], T_left[region_id], T_right[region_id], T_top[region_id], T_bot[region_id]])
+            H[region_id] = Hnew
+            K[region_id] = Knew
+
+        # ✅ Unified handling of boundary conditions
+        for (region_id, direction), neighbor_data in boundary_neighbors.items():
+            ghost_indices = neighbor_data["ghost_indices"]
+            phys_indices = neighbor_data["phys_indices"]
+            target_region = neighbor_data["target_region"]
+
+            dr1 = zones[region_id]["dr"]
+            dr2 = zones[target_region]["dr"]
+
+            if direction == "left":
+                T_left[region_id][ghost_indices] = T_phys[region_id][phys_indices]
+            elif direction == "right":
+                T_right[region_id][ghost_indices] = 2 * Tsurr - T_phys[region_id][phys_indices]
+            elif direction == "top":
+                if abs(dr1 - dr2) < tolerance:
+                    T_top[region_id] = bc.interpolate_temperature_for_same(
+                        T_top[region_id], T_phys[target_region], ghost_indices, phys_indices
+                    )
+                else:
+                    T_top[region_id] = bc.interpolate_temperature_for_coarse_and_fine(
+                        T_top[region_id], T_phys[target_region], ghost_indices, phys_indices
+                    )
+            elif direction == "bot":
+                if abs(dr1 - dr2) < tolerance:
+                    T_bot[region_id] = bc.interpolate_temperature_for_same(
+                        T_bot[region_id], T_phys[target_region], ghost_indices, phys_indices
+                    )
+                else:
+                    T_bot[region_id] = bc.interpolate_temperature_for_coarse_and_fine(
+                        T_bot[region_id], T_phys[target_region], ghost_indices, phys_indices
+                    )
+
+        # ✅ Reassemble after updating the boundaries.
+        for i in range(n_slices):
+            T[i] = np.concatenate([T_phys[i], T_left[i], T_right[i], T_top[i], T_bot[i]])
+
+
+    def plot_temperature_contour_in_circle(phys_coords_list, T_phys, radius, title='Temperature Contour', cmap='jet',
+                                           levels=20):
+        """
+        Plot contour lines of the temperature field only within the semicircular region (r, z).
+        - radius: Radius of the circle (units should be consistent with the coordinate units)
+        """
+        # 1. Merge the physical point coordinates of all regions
+        all_coords = np.vstack([arr[:, :2] for arr in phys_coords_list])  # shape: (N, 2)
+
+        # 2. Merge all temperatures
+        if isinstance(T_phys, dict):
+            all_temps = np.concatenate([T_phys[i] for i in range(len(phys_coords_list))])
+        elif isinstance(T_phys, list):
+            all_temps = np.concatenate(T_phys)
+        else:
+            raise TypeError("T_phys 必须是 list 或 dict 类型")
+
+        # 3. Create a rule grid
+        r_vals = all_coords[:, 0]
+        z_vals = all_coords[:, 1]
+        r_lin = np.linspace(np.min(r_vals)+dr1/2, np.max(r_vals), 1000)
+        z_lin = np.linspace(np.min(z_vals), np.max(z_vals), 1000)
+        r_grid, z_grid = np.meshgrid(r_lin, z_lin)
+
+        # 4. Interpolation
+        T_grid = griddata(all_coords, all_temps, (r_grid, z_grid), method='linear')
+
+        # 5. Mask processing (only retain the semicircular area)
+        mask_circle = (r_grid ** 2 + (z_grid - radius) ** 2 <= radius ** 2 + tolerance) & \
+                      (r_grid > 0) & (z_grid > 0) & (z_grid < 2 * radius)
+
+        T_grid[~mask_circle] = np.nan  # Set the area outside the circle to NaN and do not draw it.
+
+        # 6. Set contour line levels
+        vmin = np.nanmin(T_grid)
+        vmax = np.nanmax(T_grid)
+        level_values = np.linspace(vmin, vmax, levels)
+
+        # 7. Drawing
+        plt.figure(figsize=(6, 5))
+        contour = plt.contourf(r_grid, z_grid, T_grid, levels=level_values, cmap=cmap)
+
+        cbar = plt.colorbar(contour)
+        cbar.set_label(
+            f"Temperature (K)\nMin: {vmin:.2f} K\nMax: {vmax:.2f} K",
+            rotation=270, labelpad=30, va='bottom'
+        )
+
+        plt.xlabel('r (m)')
+        plt.ylabel('z (m)')
+        plt.title(title)
+        plt.xlim([0, r])
+        plt.ylim([0, 2 * r])
+        plt.tight_layout()
+        plt.show()
+
+
+    plot_temperature_contour_in_circle(phys_coords_list, T_phys, radius=r)
+    end_time2 = time.time()
+    print(f"Whole Calculation time = {end_time2 - start_time2:.2f}s")
