@@ -236,29 +236,28 @@ def generate_circle_coordinates(
 
 def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3):
     """
-    计算每个区域的 dr、delta、r、Nr 和 length，支持前 3 层自定义 dr 和 length，后续自动增长
+    Calculate dr, delta, r, Nr, and length for each region. Supports custom dr and length for the first 3 layers, with automatic growth thereafter.
 
-    参数：
-        r : float            - 半径（单位 m）
-        n_slices : int       - 总层数
-        dr1, dr2, dr3 : float - 第 1、2、3 层粒径
-        dr_l : float         - 粒径上限
-        len1, len2, len3 : float - 第 1、2、3 层厚度
-        total_height : float - 总高度（z方向）
+    Parameters:
+        r : float            - Radius (in meters)
+        n_slices : int       - Total number of layers
+        dr1, dr2, dr3 : float - Particle size for layers 1, 2, and 3
+        dr_l : float         - Upper limit of particle size
+        len1, len2, len3 : float - Thickness of the 1st, 2nd, and 3rd layers
+        total_height : float - Total height (z-direction)
 
-    返回：
-        List[Dict]: 每层 layer 的 dr, delta, r, Nr, length
+    Returns:
+        List[Dict]: dr, delta, r, Nr, and length for each layer
     """
-    assert n_slices >= 3, "需要至少三层才能使用 dr1, dr2, dr3"
+    assert n_slices >= 3, "At least three layers are required to use dr1, dr2, dr3"
     remaining_layers = n_slices - 3
     used_height = len1 + len2 + len3
     remaining_height = 2 * r - used_height
-    assert remaining_height > 0, "len1 + len2 + len3 不能超过总高度"
+    assert remaining_height > 0, "len1 + len2 + len3  Cannot exceed total height"
 
     len_rest = remaining_height / remaining_layers
     results = []
-    lock_dr = False  # 是否锁定 dr 到 dr_l
-
+    lock_dr = False  # Is dr locked to dr_l?
     for i in range(n_slices):
         if i == 0:
             dr = dr1
@@ -314,18 +313,18 @@ def generate_one_slice_coordinates(
     dz_layer = zones[slice_id]["length"]
     dr = zones[slice_id]["dr"]
 
-    # r方向范围（含 ghost）
+    # r direction range (including ghost)
     r_all = np.linspace(
         -ghost_nodes_r * dr + dr / 2,
         R + dr / 2 + (ghost_nodes_r - 1) * dr,
         Nr + 2 * ghost_nodes_r
     )
 
-    # z方向单层厚度
+    # Single layer thickness in the z direction
     z_bot = 2 * R - sum(zone['length'] for zone in zones[:slice_id + 1])
     z_top = z_bot + zones[slice_id]['length']
 
-    # z方向范围（含 ghost）
+    # z-direction range (including ghost)
     Nz = int(dz_layer / dr)
     z_all = np.linspace(
         z_bot - ghost_nodes_r * dr + dr / 2,
@@ -333,11 +332,11 @@ def generate_one_slice_coordinates(
         Nz + 2 * ghost_nodes_r
     )
 
-    # 全坐标网格
+    # Full coordinate grid
     rr, zz = np.meshgrid(r_all, z_all, indexing='xy')
     coords_all = np.column_stack([rr.ravel(), zz.ravel()])
 
-    # 主区域掩码
+    # Main area mask
     mask_phys = (
             (coords_all[:, 0] >= 0) &
             (coords_all[:, 1] >= z_bot) & (coords_all[:, 1] <= z_top + 1e-12) &
@@ -346,7 +345,7 @@ def generate_one_slice_coordinates(
     coords_phys = coords_all[mask_phys]
 
 
-    # 左侧 ghost
+    # Left ghost
     if r_ghost_left:
         mask_left = (coords_all[:, 0] < 0) & (coords_all[:, 1] >= z_bot) & (coords_all[:, 1] <= z_top)
         ghost_dict['left'] = coords_all[mask_left]
@@ -360,7 +359,7 @@ def generate_one_slice_coordinates(
         )
         ghost_dict['bot'] = coords_all[mask_bot]
 
-    # 顶部 ghost（仅当不是最顶部切片时才允许生成）
+    # top ghost(Generation is only allowed when it is not the topmost slice.)
     if r_ghost_top and slice_id != 0:
 
         mask_z_top = np.abs(coords_phys[:, 1] - z_top) <= dr/2 + 1e-16
@@ -379,10 +378,10 @@ def generate_one_slice_coordinates(
 
         ghost_dict['top'] = coords_all[mask_top]
 
-    # 右侧 ghost（注意放宽 z 范围）
+    # Right side ghost (note to widen the z range)
     if r_ghost_right:
         if slice_id == 0:
-            # 最顶部层，z 范围向上扩展
+            # Top layer, z range extends upward
             mask_right = (
                     (coords_all[:, 0] >= 0) &
                     (coords_all[:, 1] >= z_bot) &
@@ -391,7 +390,7 @@ def generate_one_slice_coordinates(
                     (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= (R + 3 * dr) ** 2 + 1e-12)
             )
         elif slice_id == n_slices - 1:
-            # 最底部层，z 范围向下扩展
+            # Bottom layer, z range extends downward
             mask_right = (
                     (coords_all[:, 0] >= 0) &
                     (coords_all[:, 1] >= z_bot - 3 * dr) &
@@ -400,7 +399,7 @@ def generate_one_slice_coordinates(
                     (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= (R + 3 * dr) ** 2 + 1e-12)
             )
         else:
-            # 中间层，正常范围
+            # Middle layer, normal range
             mask_right = (
                     (coords_all[:, 0] >= 0) &
                     (coords_all[:, 1] >= z_bot) &
@@ -410,10 +409,10 @@ def generate_one_slice_coordinates(
             )
         ghost_dict['right'] = coords_all[mask_right]
 
-    # 顶部 ghost
+    # Top ghost
 
     total_points = len(coords_phys) + sum(len(coords) for coords in ghost_dict.values())
-    # 可视化
+    # Visualization
     if graph:
         plt.figure(figsize=(6, 6))
         plt.scatter(coords_phys[:, 0], coords_phys[:, 1], s=8, label='Physical', color='blue')
@@ -429,7 +428,7 @@ def generate_one_slice_coordinates(
             if len(coords) > 0:
                 plt.scatter(coords[:, 0], coords[:, 1], s=8, label=f'Ghost {key}', color=color_map[key])
 
-        # 总颗粒数
+        # Total number of particles
 
         total_points = len(coords_phys) + sum(len(coords) for coords in ghost_dict.values())
 
@@ -438,7 +437,7 @@ def generate_one_slice_coordinates(
         plt.ylabel('z')
         plt.title(f'Slice {slice_id}, Z ∈ ({z_bot:.2e}, {z_top:.2e})')
 
-        # 设置图例并加入总数信息
+        # Set the legend and add total information
         plt.legend(title=f'Total particles: {total_points}')
         plt.grid(True)
         plt.tight_layout()
