@@ -63,7 +63,7 @@ def find_circle_mirror_pairs_multilayer(coords_ghost_circle, coords_phys, dr, R)
 
     for i, (xg, zg) in enumerate(coords_ghost_circle):
         # Compute radial distance from ghost point to circle center (0, R)
-        r_ghost = np.sqrt(xg**2 + (zg - R)**2)
+        r_ghost = np.sqrt( xg ** 2 + (zg - R) ** 2 )
         k = int(round((r_ghost - R) / dr))  # Determine ghost layer index
 
         # Compute unit outward normal vector from center to ghost point
@@ -74,7 +74,6 @@ def find_circle_mirror_pairs_multilayer(coords_ghost_circle, coords_phys, dr, R)
 
         # Find nearest physical point to the mirrored coordinate
         dists = np.linalg.norm(coords_phys - mirror_point, axis=1)
-        a = coords_phys[np.argmin(dists)]
         idx_phys = np.argmin(dists)
 
         ghost_indices.append(i)
@@ -86,7 +85,7 @@ def find_circle_mirror_pairs_multilayer(coords_ghost_circle, coords_phys, dr, R)
 
 def get_same_neighbor_points(
     ghost_coords: np.ndarray,
-    phys_coords: np.ndarray,
+    coords: np.ndarray,
     tol: float = 1e-12
 ):
     """
@@ -106,7 +105,7 @@ def get_same_neighbor_points(
 
     # Match only r and z coordinates
     ghost_rz = ghost_coords[:, :2]
-    phys_rz = phys_coords[:, :2]
+    phys_rz = coords[:, :2]
 
     for i, g in enumerate(ghost_rz):
         diffs = np.linalg.norm(phys_rz - g, axis=1)
@@ -145,16 +144,18 @@ def get_fine_neighbor_points(
         for target in neighbor_targets:
             diffs = np.linalg.norm(phys_coords - target, axis=1)
             idx = np.where(diffs < tol)[0]
-
             if idx.size == 1:
                 matched_indices.append(idx[0])
             elif idx.size == 0:
-                continue  
+                continue
             else:
                 raise ValueError(f"Target {target} matched multiple physical points: {idx}")
 
         if len(matched_indices) < 2:
-            raise ValueError(f"Ghost point {g} matched fewer than 2 physical points.")
+            raise ValueError(f"Ghost point {g} matched less than 2 physical points.")
+
+        if len(matched_indices) > 4:
+            raise ValueError(f"Ghost point {g} matched over than 4 physical points.")
 
         ghost_indices.append(i)
         phys_indices.append(np.array(matched_indices, dtype=int))
@@ -197,7 +198,7 @@ def interpolate_temperature_for_coarse_and_fine(
     T_result = T_ghost.copy()
 
     for i, g_idx in enumerate(ghost_indices):
-        p_list = phys_indices[i]  
+        p_list = phys_indices[i]
         T_result[g_idx] = np.mean([T_fine[j] for j in p_list])
 
     return T_result
@@ -211,7 +212,7 @@ def interpolate_temperature_for_same(
 
     T_result = T_ghost.copy()
     for i, g_idx in enumerate(ghost_indices):
-        p_idx = phys_indices[i]  
+        p_idx = phys_indices[i]
         T_result[g_idx] = T_phys[p_idx]
 
     return T_result
