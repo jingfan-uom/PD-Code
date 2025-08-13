@@ -567,10 +567,10 @@ if __name__ == "__main__":
             Ur[i], Uz[i],  # Ur_curr, Uz_curr
             horizon_masks_m[i],  # horizon_mask
             dir_r_m[i], dir_z_m[i],  # dir_r, dir_z
-            c_m[i],  # c（该区域刚度系数）
+            c_m[i],  
             partial_area_matrices_m[i],  # partial_area_matrix
             rho_s,  # rho
-            T[i], Tpre_avg,  # T_curr, T_prev  ← 若你用 Tpre_avg，请改成相应变量
+            T[i], Tpre_avg,  # T_curr, T_prev  
             nu, alpha, CorrList_T[i] # nu, alpha
         ))
 
