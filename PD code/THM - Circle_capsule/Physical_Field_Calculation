@@ -1,0 +1,313 @@
+from scipy.spatial import cKDTree
+import numpy as np
+
+def compute_direction_matrix(coords, ux, uz, horizon_mask):
+    """
+    Compute updated direction matrix based on current relative positions: (x' + u') - (x + u)
+
+    Inputs:
+    - coords: (N, 2) array, column 0 = x coordinate, column 1 = y coordinate
+    - ux, uz: displacement vectors (N,)
+    - horizon_mask: (N, N) boolean mask indicating valid interactions
+
+    Outputs:
+    - dir_x, dir_z: direction unit vectors (N, N)
+    """
+    x = coords[:, 0]
+    y = coords[:, 1]
+
+    # Current relative positions after deformation
+    dx_eff = (x[None, :] + ux[None, :]) - (x[:, None] + ux[:, None])
+    dz_eff = (y[None, :] + uz[None, :]) - (y[:, None] + uz[:, None])
+
+    dist_eff = np.sqrt(dx_eff**2 + dz_eff**2)
+
+    # Only compute values where horizon_mask is True
+    dir_x = np.zeros_like(dx_eff)
+    dir_z = np.zeros_like(dz_eff)
+
+    mask = horizon_mask & (dist_eff > 0)  # avoid division by zero
+    dir_x[mask] = dx_eff[mask] / dist_eff[mask]
+    dir_z[mask] = dz_eff[mask] / dist_eff[mask]
+
+    return dir_x, dir_z
+
+
+
+def compute_Tensor_product(x, y, horizon_mask):
+
+    # Current relative positions after deformation: x '- x
+    dx_eff = x[None, :] - x[:, None]
+    dz_eff = y[None, :] - y[:, None]
+    dist_eff = np.sqrt(dx_eff**2 + dz_eff**2)
+    # Only compute values where horizon_mask is True; set others to zero
+    n_x = np.zeros_like(dx_eff)
+    n_z = np.zeros_like(dz_eff)
+
+    n_x[horizon_mask] = dx_eff[horizon_mask] / dist_eff[horizon_mask]
+    n_z[horizon_mask] = dz_eff[horizon_mask] / dist_eff[horizon_mask]
+
+    N = n_x.shape[0]
+    Cxx = np.zeros((N, N))
+    Cxz = np.zeros((N, N))
+    Czx = np.zeros((N, N))
+    Czz = np.zeros((N, N))
+
+    for i in range(N):
+        for j in range(N):
+            # 只对有效（horizon_mask为True）的键计算
+            if horizon_mask[i, j]:
+                n_vec = np.array([n_x[i, j], n_z[i, j]])  # 组成二维单位向量
+                n_outer = np.outer(n_vec, n_vec)  # 2x2张量积
+
+                Cxx[i, j] = n_outer[0, 0]
+                Cxz[i, j] = n_outer[0, 1]
+                Czx[i, j] = n_outer[1, 0]
+                Czz[i, j] = n_outer[1, 1]
+
+    return Cxx, Cxz, Czx, Czz
+
+def compute_s_matrix(coords, Ux, Uz, horizon_mask):
+    """
+    Compute elongation matrix s_matrix (N, N) using vectorized matrix operations.
+
+    Parameters:
+        coords: (N, 2) array of original coordinates (x, y)
+        Ux, Uz: displacement arrays (N,)
+        horizon_mask: boolean array of shape (N, N), True if bond (i, j) is valid
+
+    Returns:
+        s_matrix: elongation matrix (N, N)
+    """
+    # Original coordinates
+    x_flat = coords[:, 0]
+    y_flat = coords[:, 1]
+
+    # Deformed coordinates
+    x_def = x_flat + Ux
+    y_def = y_flat + Uz
+
+    # Initial lengths L0
+    dx0 = x_flat[None, :] - x_flat[:, None]
+    dz0 = y_flat[None, :] - y_flat[:, None]
+    L0 = np.sqrt(dx0 ** 2 + dz0 ** 2)
+
+    # Deformed lengths L1
+    dx1 = x_def[None, :] - x_def[:, None]
+    dz1 = y_def[None, :] - y_def[:, None]
+    L1 = np.sqrt(dx1 ** 2 + dz1 ** 2)
+
+    # Elongation computation (vectorized)
+    s_matrix = np.zeros_like(L0)
+    mask = horizon_mask & (L0 > 0)
+    s_matrix[mask] = (L1[mask] - L0[mask]) / L0[mask]
+
+    return s_matrix
+
+
+
+
+def compute_delta_temperature(T_grid, Tpre_avg):
+    """
+    Compute the average temperature matrix and the difference from the previous step.
+
+    Parameters:
+        T_grid: current temperature field (1D or flattened)
+        Tpre_avg: average temperature matrix from previous time step, shape (N, N)
+
+    Returns:
+        T_delta: difference between current and previous average temperature matrices
+    """
+    T_i = T_grid[:, np.newaxis]  # shape (N, 1)
+    T_j = T_grid[np.newaxis, :]  # shape (1, N)
+    Tcurr_avg = 0.5 * (T_i + T_j)- Tpre_avg  # shape (N, N)
+
+    return Tcurr_avg
+
+
+
+import numpy as np
+from scipy.spatial import cKDTree
+
+def shrink_Tth_by_matching_coords(coords_m, coords_t):
+    """
+    Find the closest matching point in the temperature field coordinates coords_t using the mechanical field coordinates coords_m,
+    and return the matching index in coords_t (used to map the temperature field array to the mechanical field order).
+
+    Parameters:
+        coords_m : ndarray, shape (Nm, 2) or (Nm, 3)
+        coords_t : ndarray, shape (Nt, 2) or (Nt, 3)
+
+    Returns:
+        indices : ndarray, shape (Nm,)   # Corresponding indices in coords_t
+    """
+    coords_m = np.asarray(coords_m)
+    coords_t = np.asarray(coords_t)
+
+    # If there are three columns, take the first two columns to match
+    if coords_m.shape[1] >= 3:
+        coords_m = coords_m[:, :2]
+    if coords_t.shape[1] >= 3:
+        coords_t = coords_t[:, :2]
+
+    # Nearest Neighbor Matching
+    tree = cKDTree(coords_t)
+    _, indices = tree.query(coords_m, k=1)
+
+    return indices.astype(np.int64)
+
+
+
+def filter_array_by_indices_keep_only(Tarr, indices):
+    """
+    Keep only elements in Tarr whose indices are in the given list.
+
+    Parameters:
+        Tarr: 1D array to filter
+        indices: indices to retain
+
+    Returns:
+        Filtered 1D array with only selected elements
+    """
+    keep_mask = np.zeros_like(Tarr, dtype=bool)
+    keep_mask[indices] = True
+
+    # Filter using mask
+    Tth_shrunk = Tarr[keep_mask]
+
+    return Tth_shrunk
+
+
+
+def compute_single_stiffness_tensor(n_r, n_z, c_modu, k_modu, distance):
+    """
+    Compute the 2D stiffness tensor of a single bond (in r and z directions).
+    This function is used in EBBPD (Extended Bond-Based Peridynamic) models.
+
+    Parameters:
+        n_r:      ndarray (2,), unit vector in the r-direction
+        n_z:      ndarray (2,), unit vector in the z-direction
+        c_modu:   float, normal stiffness modulus
+        k_modu:   float, shear stiffness modulus
+        distance: float, distance between particles
+
+    Returns:
+        cr_stiffness, cz_stiffness: ndarray (2, 2), 2×2 bond stiffness tensors
+    """
+    I = np.eye(*k_modu.shape)
+
+    nr_outer = np.outer(n_r, n_r)
+    nz_outer = np.outer(n_z, n_z)
+
+    cr_stiffness = (c_modu * nr_outer + k_modu * (I - nr_outer)) / distance
+    cz_stiffness = (c_modu * nz_outer + k_modu * (I - nz_outer)) / distance
+
+    return cr_stiffness, cz_stiffness
+
+
+def update_mu_by_failure(mu, Relative_elongation, s0):
+    """
+    JIT-compatible version: Update the damage state (μ) based on bond failure criteria.
+
+    Parameters:
+        mu: ndarray of int (1/0), bond damage matrix (N x N)
+        Relative_elongation: ndarray of float, relative elongation (N x N)
+        s0: float, failure threshold
+
+    Returns:
+        mu_new: updated μ matrix
+    """
+    N = mu.shape[0]
+    mu_new = np.empty_like(mu)
+
+    for i in range(N):
+        for j in range(N):
+            if mu[i, j] == 1 and Relative_elongation[i, j] >= s0:
+                mu_new[i, j] = 0
+            else:
+                mu_new[i, j] = mu[i, j]
+
+    return mu_new
+
+
+
+def make_pairwise_material_matrices(mask_core, E_core, E_shell, alpha_core, alpha_shell, s0_core, s0_shell):
+    """
+    Assign pairwise material properties based on core-shell structure,
+    and return fully symmetric pairwise average matrices for each property.
+
+    Parameters:
+        mask_core:   ndarray of bool, True for core particles, False for shell particles
+        E_core:      float, Young’s modulus for core
+        E_shell:     float, Young’s modulus for shell
+        alpha_core:  float, thermal expansion coefficient for core
+        alpha_shell: float, thermal expansion coefficient for shell
+        s0_core:     float, critical stretch for core
+        s0_shell:    float, critical stretch for shell
+
+    Returns:
+        E_avg:       ndarray, symmetric matrix of pairwise averaged Young’s modulus
+        alpha_avg:   ndarray, symmetric matrix of pairwise averaged thermal expansion coefficient
+        s0_avg:      ndarray, symmetric matrix of pairwise averaged critical stretch
+    """
+    # Assign field values
+    E_field = np.where(mask_core, E_core, E_shell)
+    alpha_field = np.where(mask_core, alpha_core, alpha_shell)
+    s0_field = np.where(mask_core, s0_core, s0_shell)
+
+    # Flatten to 1D arrays
+    E_flat = E_field.ravel()
+    alpha_flat = alpha_field.ravel()
+    s0_flat = s0_field.ravel()
+
+    # Construct symmetric pairwise average matrices
+    E_avg = (E_flat[None, :] + E_flat[:, None]) / 2
+    alpha_avg = (alpha_flat[None, :] + alpha_flat[:, None]) / 2
+    s0_avg = (s0_flat[None, :] + s0_flat[:, None]) / 2
+    return E_avg, alpha_avg, s0_avg
+
+
+
+def mark_prebroken_bonds_from_mesh(mu, r_flat_m, z_flat_m, horizon_mask_m, crack_start, crack_end):
+    """
+    Mark pre-broken bonds (mu[i, j] = 0) that intersect with a given crack segment.
+    Positions are automatically constructed from Rmat and Zmat.
+
+    Parameters:
+    - mu : ndarray (N, N) —— Initial damage matrix (1 = intact, 0 = pre-broken)
+    - r_flat_m, z_flat_m : ndarray —— Flattened meshgrid coordinates
+    - horizon_mask_m : ndarray (N, N) —— Bond connection mask
+    - crack_start, crack_end : list or array —— Coordinates of the crack segment endpoints (e.g., [0.02, 0.025])
+
+    Returns:
+    - Updated damage matrix mu
+    """
+    positions = np.column_stack((r_flat_m, z_flat_m))  # shape = (N, 2)
+
+    # Vector representing the crack segment
+    C = np.array(crack_start)
+    D = np.array(crack_end)
+    CD = D - C
+    N = positions.shape[0]
+
+    for i in range(N):
+        for j in range(N):
+            if i == j or not horizon_mask_m[i, j]:
+                continue  # Skip self-bonds or non-connected bonds
+
+            A = positions[i]
+            B = positions[j]
+            AB = B - A
+
+            AC = C - A
+            AD = D - A
+            CA = A - C
+            CB = B - C
+
+            cross1 = np.cross(AC, AB) * np.cross(AD, AB)
+            cross2 = np.cross(CA, CD) * np.cross(CB, CD)
+
+            if cross1 < 0 and cross2 < 0:
+                mu[i, j] = 0
+                mu[j, i] = 0  # Ensure symmetry
+    return mu
