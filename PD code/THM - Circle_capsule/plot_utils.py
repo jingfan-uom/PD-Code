@@ -204,15 +204,13 @@ def temperature_contour(T, coords,  total_time, nsteps, dr, r):
     z_vals = np.linspace(0, 2 * r, Nz_plot)
     R_grid, Z_grid = np.meshgrid(r_vals, z_vals, indexing='ij')
 
-    # 插值
+
     T_grid = griddata(coords, T, (R_grid, Z_grid), method='linear')
 
-    # 温度范围
     T_min = np.nanmin(T)
     T_max = np.nanmax(T)
     levels = np.linspace(np.nanmin(280), np.nanmax(400), num=9)
 
-    # 绘图
     plt.figure(figsize=(6, 5))
     ctf = plt.contourf(R_grid, Z_grid, T_grid, levels=levels, cmap='jet')
     plt.xlim([0.0, r])
@@ -231,3 +229,4 @@ def temperature_contour(T, coords,  total_time, nsteps, dr, r):
     plt.title(f"Temperature after {total_time:.1f}s ({nsteps} steps)")
     plt.tight_layout()
     plt.show()
+
