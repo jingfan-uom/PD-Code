@@ -1,4 +1,3 @@
-
 import generate_coordinates as gc
 import ADR
 from multiprocessing import Pool
@@ -16,10 +15,10 @@ rho_l, cl, kl = 1000.0, 4182.0, 0.6
 Ts = 312.65
 Tl = 313.65
 L = 333
-E = 25.7e9                  # Elastic modulus [Pa]
-nu = 0.25                # Poisson's ratio
-K = 1.0                  # Thermal conductivity [W/(m·K)]
-alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
+E = 25.7e9  # Elastic modulus [Pa]
+nu = 0.25  # Poisson's ratio
+K = 1.0  # Thermal conductivity [W/(m·K)]
+alpha = 1.8e-5  # Thermal expansion coefficient [1/K]
 h = 1.0
 tolerance = 1e-14
 Tsurr = 400
@@ -27,26 +26,27 @@ Tinit = 283.15
 Tpre_avg = 283.15
 """ Initialization of coarse regions and temperatures """
 # dr1, dr2, dr3 are used to generate regional particle density by calling functions to create coordinates.
-r = 20 * 1e-6  # Domain size in r and z directions (meters)
+size = 1e-6
+r = 20 * size  # Domain size in r and z directions (meters)
 
-dr1 = 0.05 * 1e-6
-dr2 = 0.05 * 1e-6
-dr3 = 2 * dr2
-dr_l = 0.4 * 1e-6
+dr1 = 0.5 * size
+dr2 = 0.5 * size
+dr3 = 1 * dr2
+dr_l = 0.5 * size
 
-len1 = 0.5 * 1e-6
-len2 = 0.5 * 1e-6
-len3 = 1 * 1e-6
+len1 = 10 * size
+len2 = 10 * size
+len3 = 10 * size
 
 ghost_nodes_r = 3  # Number of ghost cells in the x (or r) direction
-n_slices = 8
+n_slices = 4
 """Note that n_slices here refers to the minimum number of layers. 
 Subsequent checks and modifications will be performed 
 in the gc.compute_layer_dr_r_nr function to ensure that the granularity of each layer is reasonable."""
 num_processes = 1
 
-total_time = 1000e-8
-rms = 1e-12
+total_time = 400e-6
+rms = 1e-10
 # ------------------------
 # Compute distance matrix and horizon mask
 # ------------------------
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     """1. Definition of regional coordinates and area matrix (shared for T and M)"""
 
     zones, n_slices = gc.compute_layer_dr_r_nr(
-        r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3
+        r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3, size, ghost_nodes_r
     )
 
     for z in zones:
@@ -82,7 +82,7 @@ if __name__ == "__main__":
             r_ghost_bot=True,
             n_slices=n_slices,
             slice_id=i,
-            graph=True
+            graph=False
         )
         print(f"[Temperature] Number of particles in region {i}: {n_points_t}")
 
@@ -150,11 +150,10 @@ if __name__ == "__main__":
         true_indices_list_t.append(tuple(data["indices"]))
 
     end_time_t = time.time()
-    print(f"[Temperature] Calculation of partial_area_matrices finished, elapsed real time = {end_time_t - start_time_t:.2f}s")
+    print(
+        f"[Temperature] Calculation of partial_area_matrices finished, elapsed real time = {end_time_t - start_time_t:.2f}s")
 
     # -------- Mechanical field --------
-
-    c_m = []
     start_time_m = time.time()
     task_args_m = []
     for i in range(n_slices):
@@ -162,9 +161,6 @@ if __name__ == "__main__":
         dr = zones[i]["dr"]  # shared
         delta = zones[i]["delta"]  # shared
         slice_id = zones[i]["layer"]  # shared
-        c_i = (6.0 * E) / (np.pi * (delta ** 3) * h * (1.0 - 2.0 * nu) * (1.0 + nu))
-        c_m.append(c_i)
-
         task_args_m.append((coords_m, dr, delta, tolerance, slice_id))
 
     if num_processes == 1:
@@ -178,12 +174,21 @@ if __name__ == "__main__":
     horizon_masks_m = []
     true_indices_list_m = []
 
+    c_m = []
     for i, file_path in enumerate(results_m):
         data = np.load(file_path)
         distance_matrices_m.append(data["distance"])
         partial_area_matrices_m.append(data["area"])
         horizon_masks_m.append(data["mask"])
         true_indices_list_m.append(tuple(data["indices"]))
+
+        row_sum = np.sum(partial_area_matrices_m[i], axis=1)  # (N,)
+        matrix_sum = row_sum[:, None] + row_sum[None, :]  # (N, N)
+
+        delta = zones[i]["delta"]
+        c_micro = (6.0 * E) / (np.pi * (delta ** 3) * h * (1.0 - 2.0 * nu) * (1.0 + nu))
+        c_modu = (2.0 * np.pi * delta ** 2 / matrix_sum) * c_micro
+        c_m.append(c_modu)
 
     end_time_m = time.time()
     print(
@@ -278,6 +283,7 @@ if __name__ == "__main__":
 
     # Mechanical field boundary mapping
     ghost_top_m = {}
+    ghost_right_m = {}
     ghost_bot_m = {}
     ghost_left_m = {}
     phys_m = {}
@@ -286,6 +292,7 @@ if __name__ == "__main__":
         ghost_top_m[i] = ghost_dict_list_m[i]["top"]
         ghost_bot_m[i] = ghost_dict_list_m[i]["bot"]
         ghost_left_m[i] = ghost_dict_list_m[i]["left"]
+        ghost_right_m[i] = ghost_dict_list_m[i]["right"]
         phys_m[i] = phys_coords_list_m[i]
 
     # Save the matching relationship between each pair of adjacent regions
@@ -334,19 +341,6 @@ if __name__ == "__main__":
                 "target_region": i
             }
 
-        coords_ghost_left_m = ghost_left_m[i][:, :2]
-        coords_phys_m = phys_m[i][:, :2]
-
-        # Left boundary (mirror about r=0)
-        ghost_idx_left_m, phys_idx_left_m = bc.find_mirror_pairs(
-            coords_ghost_left_m, coords_phys_m, tolerance
-        )
-        boundary_neighbors_m[(i, 'left')] = {
-            "ghost_indices": ghost_idx_left_m,
-            "phys_indices": phys_idx_left_m,
-            "target_region": i
-        }
-
     # Note: No right boundary for mechanical field
 
     """3. Definition of temperature field"""
@@ -358,26 +352,13 @@ if __name__ == "__main__":
     factor_mats = {}
 
     for i in range(n_slices):
-        dr = zones[i]["dr"]
-        coords_phys = phys_t[i][:, :2]
-        coords_ghost_left = ghost_left_t[i][:, :2]
-        coords_ghost_right = ghost_right_t[i][:, :2]
-        coords_ghost_top = ghost_top_t[i][:, :2]
-        coords_ghost_bot = ghost_bot_t[i][:, :2]
-        distance_matrix = distance_matrices_t[i]
-
-        # 1. Factor matrix
-        threshold_distance = np.sqrt(2) * dr
-        factor_mats[i] = np.where(distance_matrix <= threshold_distance + tolerance, 1.125, 1.0)
-
-        # 2. Initialize the physical temperature field
-        T_phys[i] = np.full(coords_phys.shape[0], Tinit)
-
-        # 3. Initialize the ghost temperature field
-        T_left[i] = np.full(coords_ghost_left.shape[0], Tinit)
-        T_right[i] = np.full(coords_ghost_right.shape[0], Tsurr)
-        T_top[i] = np.full(coords_ghost_top.shape[0], Tinit)
-        T_bot[i] = np.full(coords_ghost_bot.shape[0], Tinit)
+        threshold_distance = np.sqrt(2) * zones[i]["dr"]
+        factor_mats[i] = np.where(distance_matrices_t[i] <= threshold_distance + tolerance, 1.125, 1.0)
+        T_phys[i] = np.full(phys_t[i].shape[0], Tinit)
+        T_left[i] = np.full(ghost_left_t[i].shape[0], Tinit)
+        T_right[i] = np.full(ghost_right_t[i].shape[0], Tsurr)
+        T_top[i] = np.full(ghost_top_t[i].shape[0], Tinit)
+        T_bot[i] = np.full(ghost_bot_t[i].shape[0], Tinit)
 
     # Boundary temperature assignment
     T = {}
@@ -418,7 +399,6 @@ if __name__ == "__main__":
             phys_indices = neighbor_data["phys_indices"]
             T_right[region_id][ghost_indices] = 2 * Tsurr - T[region_id][phys_indices]
 
-
     """4. Definition of enthalpy for temperature field"""
     dt_th = cf.compute_dt_cr_th_solid_with_dist(
         rho_s,
@@ -428,7 +408,7 @@ if __name__ == "__main__":
         horizon_masks_t[0],  # region 1 horizon_mask
         distance_matrices_t[0],  # region 1 distance_matrix
         zones[0]["delta"]  # region 1 elta
-    ) * 0.5
+    ) * 0.8
 
     H = {}
     K = {}
@@ -437,19 +417,12 @@ if __name__ == "__main__":
     segment_slices_t = {}
 
     for i in range(n_slices):
-        # Get the current temperature array for each region
-        T_p = T_phys[i]
-        T_l = T_left.get(i, np.array([]))       # no suffix for T_left
-        T_r = T_right.get(i, np.array([]))    # suffix for T_right
-        T_t = T_top.get(i, np.array([]))      # suffix for T_top
-        T_b = T_bot.get(i, np.array([]))      # suffix for T_bot
-
         # Segment length
-        n_phys = len(T_p)
-        n_left = len(T_l)
-        n_right = len(T_r)
-        n_top = len(T_t)
-        n_bot = len(T_b)
+        n_phys = len(T_phys[i])
+        n_left = len(T_left[i])
+        n_right = len(T_right[i])
+        n_top = len(T_top[i])
+        n_bot = len(T_bot[i])
         # build slices for [phys | left | right | top | bot]
         s0 = 0
         s1 = s0 + n_phys
@@ -457,6 +430,7 @@ if __name__ == "__main__":
         s3 = s2 + n_right
         s4 = s3 + n_top
         s5 = s4 + n_bot
+
         segment_slices_t[i] = {
             "phys": slice(s0, s1),
             "left": slice(s1, s2),
@@ -467,7 +441,7 @@ if __name__ == "__main__":
         }
 
         # Total temperature field of the patchwork
-        T[i] = np.concatenate([T_p, T_l, T_r, T_t, T_b])
+        T[i] = np.concatenate([T_phys[i], T_left[i], T_right[i], T_top[i], T_bot[i]])
         delta = zones[i]["delta"]
 
         # Save the length information for each segment
@@ -503,7 +477,7 @@ if __name__ == "__main__":
     segment_slices_m = {}  # per-region slices into concatenated order: [phys | left | top | bot]
     CorrList_T = {}
     T_m = {}
-    dir_r_m, dir_z_m = {}, {}  # The direction matrix can still be represented by _m to denote “the direction matrix of the mechanical field.”
+    dir_r_m, dir_z_m = {}, {}  # 方向矩阵仍可用 _m 表示“机械场的方向矩阵”
     coords_all_m_list = [np.vstack([phys_coords_list_m[i], ghost_coords_list_m[i]]) for i in range(n_slices)]
     coords_all_t_list = [np.vstack([phys_coords_list_t[i], ghost_coords_list_t[i]]) for i in range(n_slices)]
 
@@ -512,34 +486,36 @@ if __name__ == "__main__":
         coords_all_t = np.vstack([phys_coords_list_t[i], ghost_coords_list_t[i]])
         CorrList_T[i] = pfc.shrink_Tth_by_matching_coords(coords_all_m_list[i], coords_all_t_list[i])
 
-        n_phys = phys_coords_list_m[i].shape[0]
-        n_left = ghost_left_m[i].shape[0]
-        n_top = ghost_top_m[i].shape[0]
-        n_bot = ghost_bot_m[i].shape[0]
-
         region_lengths_m[i] = {
-            'n_phys': n_phys,
-            'n_left': n_left,
-            'n_top': n_top,
-            'n_bot': n_bot
+            'n_phys': phys_coords_list_m[i].shape[0],
+            'n_left': ghost_left_m[i].shape[0],
+            'n_right': ghost_right_m[i].shape[0],
+            'n_top': ghost_top_m[i].shape[0],
+            'n_bot': ghost_bot_m[i].shape[0]
         }
+
         s0 = 0
-        s1 = s0 + n_phys
-        s2 = s1 + n_left
-        s3 = s2 + n_top
-        s4 = s3 + n_bot
+        s1 = s0 + phys_coords_list_m[i].shape[0]
+        s2 = s1 + ghost_left_m[i].shape[0]
+        s3 = s2 + ghost_right_m[i].shape[0]
+        s4 = s3 + ghost_top_m[i].shape[0]
+        s5 = s4 + ghost_bot_m[i].shape[0]
+
         segment_slices_m[i] = {
-            'phys': slice(s0, s1),
-            'left': slice(s1, s2),
-            'top': slice(s2, s3),
-            'bot': slice(s3, s4),
-            'total_len': s4
+            "phys": slice(s0, s1),
+            "left": slice(s1, s2),
+            "right": slice(s2, s3),
+            "top": slice(s3, s4),
+            "bot": slice(s4, s5),
+            "total_len": s5
         }
+
         total_points_region = (
                 phys_coords_list_m[i].shape[0]
                 + ghost_top_m[i].shape[0]
                 + ghost_bot_m[i].shape[0]
-                + ghost_left_m[i].shape[0]  # Mechanical field without right boundary
+                + ghost_left_m[i].shape[0]
+                + ghost_right_m[i].shape[0]
         )
 
         total_len = segment_slices_m[i]['total_len']  # = n_phys + n_left + n_top + n_bot
@@ -557,32 +533,30 @@ if __name__ == "__main__":
             horizon_masks_m[i]
         )
 
-
     """     5. Displacement initialization      """
-    task_args_accel_m = []
+    task_args_accel_m_ini = []
     for i in range(n_slices):
-
-        task_args_accel_m.append((
+        task_args_accel_m_ini.append((
             coords_all_m_list[i],  # coords_all
             Ur[i], Uz[i],  # Ur_curr, Uz_curr
             horizon_masks_m[i],  # horizon_mask
             dir_r_m[i], dir_z_m[i],  # dir_r, dir_z
-            c_m[i],  
+            c_m[i],  # c（该区域刚度系数）
             partial_area_matrices_m[i],  # partial_area_matrix
             rho_s,  # rho
-            T[i], Tpre_avg,  # T_curr, T_prev  
-            nu, alpha, CorrList_T[i] # nu, alpha
+            T[i], Tpre_avg,  # T_curr, T_prev  ← 若你用 Tpre_avg，请改成相应变量
+            nu, alpha, CorrList_T[i]  # nu, alpha
         ))
 
     # ---------- 3) Calculation (serial/multiprocessing) ----------
     if num_processes == 1:
-        results_accel = [mt.compute_accelerated_velocity(args) for args in task_args_accel_m]
+        results_accel_ini = [mt.compute_accelerated_velocity_initial(args) for args in task_args_accel_m_ini]
     else:
         with Pool(processes=num_processes) as pool:
-            results_accel = pool.map(mt.compute_accelerated_velocity, task_args_accel_m)
+            results_accel_ini = pool.map(mt.compute_accelerated_velocity_initial, task_args_accel_m_ini)
 
-    # Fill in the acceleration for each area
-    for idx, (Ar_new, Az_new) in enumerate(results_accel):
+    # 回填每个区域的加速度
+    for idx, (Ar_new, Az_new) in enumerate(results_accel_ini):
         Ar[idx] = Ar_new
         Az[idx] = Az_new
 
@@ -596,7 +570,6 @@ if __name__ == "__main__":
     Vr_half, Vz_half = {}, {}
 
     for i in range(n_slices):
-
         Fr_0[i] = Ar[i] * rho_s
         Fz_0[i] = Az[i] * rho_s
 
@@ -610,18 +583,51 @@ if __name__ == "__main__":
         # Half-step speed
         Vr_half[i] = (1 / 2) * (Fr_0[i] / lambda_diag_matrix[i])
         Vz_half[i] = (1 / 2) * (Fz_0[i] / lambda_diag_matrix[i])
+        Ur[i] = Vr_half[i] * 1 + Ur[i]
+        Uz[i] = Vz_half[i] * 1 + Uz[i]
+        Ur[i][segment_slices_m[i]['left']] = 0.0
 
-    # ------------ 3) Calculation (serial / multi-process)------------
-    if num_processes == 1:
-        results_accel = [mt.compute_accelerated_velocity(args) for args in task_args_accel_m]
-    else:
-        with Pool(processes=num_processes) as pool:
-            results_accel = pool.map(mt.compute_accelerated_velocity, task_args_accel_m)
+    for (region_id, direction), neighbor_data in boundary_neighbors_m.items():
+        if direction not in ('top', 'bot'):
+            continue
+        ghost_indices = neighbor_data["ghost_indices"]  # Index relative to ghost segment (local)
+        phys_indices = neighbor_data["phys_indices"]  # Index relative to target's phys segment (local)
+        target_region = neighbor_data["target_region"]
 
-    # ------------ 4) Backfill results ------------
-    for idx, (Ar_new, Az_new) in enumerate(results_accel):
-        Ar[idx] = Ar_new
-        Az[idx] = Az_new
+        dr1 = zones[region_id]["dr"]
+        dr2 = zones[target_region]["dr"]
+
+        # Extract the ghost segment slice from this area and the phys segment slice from the target area.
+        sl_ghost = segment_slices_m[region_id][direction]  # 'top' or 'bot'
+        sl_phys = segment_slices_m[target_region]['phys']
+
+        # Retrieve the corresponding view segment
+        # (note: this is a 1D segment vector, ghost_indices/phys_indices are the local indices of this segment)
+        Ur_ghost_seg = Ur[region_id][sl_ghost]
+        Uz_ghost_seg = Uz[region_id][sl_ghost]
+        Ur_phys_seg = Ur[target_region][sl_phys]
+        Uz_phys_seg = Uz[target_region][sl_phys]
+
+        # Same/different grid interpolation: General functions for reusing temperature fields
+        # (they apply to any scalar field)
+        if abs(dr1 - dr2) < tolerance:
+            Ur_new_seg = bc.interpolate_temperature_for_same(
+                Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
+            )
+            Uz_new_seg = bc.interpolate_temperature_for_same(
+                Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
+            )
+        else:
+            Ur_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
+                Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
+            )
+            Uz_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
+                Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
+            )
+
+        # Write back to this area ghost segment
+        Ur[region_id][sl_ghost] = Ur_new_seg
+        Uz[region_id][sl_ghost] = Uz_new_seg
 
     # ------------------------
     # Time-stepping loop
@@ -666,7 +672,6 @@ if __name__ == "__main__":
 
         # ✅ Split results
         for region_id, Tnew, Hnew, Knew in results:
-
             sl = segment_slices_t[region_id]
             T_phys[region_id] = Tnew[sl["phys"]]
             T_left[region_id] = Tnew[sl["left"]]
@@ -720,82 +725,74 @@ if __name__ == "__main__":
             Ur_all_prev = np.concatenate([Ur[j] for j in range(n_slices)])
             Uz_all_prev = np.concatenate([Uz[j] for j in range(n_slices)])
 
+            task_args_accel_m = []
             for i in range(n_slices):
                 T[i] = np.concatenate([T_phys[i], T_left[i], T_right[i], T_top[i], T_bot[i]])
-                Ar_i, Az_i = mt.compute_accelerated_velocity((
-                    coords_all_m_list[i],  # coords_all
-                    Ur[i], Uz[i],  # Ur_curr, Uz_curr
-                    horizon_masks_m[i],  # horizon_mask
-                    dir_r_m[i], dir_z_m[i],  # dir_r, dir_z
-                    c_m[i],  # c
-                    partial_area_matrices_m[i],  # partial_area_matrix
-                    rho_s,  # rho
-                    T[i], Tpre_avg,  # T_curr, T_prev
-                    nu, alpha, CorrList_T[i]  # nu, alpha, CorrList_T
+                task_args_accel_m.append((
+                    coords_all_m_list[i], Ur[i], Uz[i],
+                    horizon_masks_m[i], dir_r_m[i], dir_z_m[i],
+                    c_m[i], partial_area_matrices_m[i], rho_s,
+                    T[i], Tpre_avg, nu, alpha, CorrList_T[i],
+                    Fr_0[i], Fz_0[i], Vr_half[i], Vz_half[i],
+                    lambda_diag_matrix[i], ADR
                 ))
-                Ar[i], Az[i] = Ar_i, Az_i
-                Fr[i] = Ar[i] * rho_s
-                Fz[i] = Az[i] * rho_s
+            if num_processes == 1:
+                results_accel = [mt.compute_mechanical_step(args) for args in task_args_accel_m]
+            else:
+                with Pool(processes=num_processes) as pool:
+                    results_accel = pool.map(mt.compute_mechanical_step, task_args)
 
-                cr_n[i] = ADR.compute_local_damping_coefficient(
-                    Fr[i], Fr_0[i], Vr_half[i], lambda_diag_matrix[i], Ur[i], 1
-                )
-                cz_n[i] = ADR.compute_local_damping_coefficient(
-                    Fz[i], Fz_0[i], Vz_half[i], lambda_diag_matrix[i], Uz[i], 1
-                )
-                Fr_0[i] = Fr[i]
-                Fz_0[i] = Fz[i]
+            for i, (Ur_new, Uz_new, Fr_0_new, Fz_0_new, Vr_half_new, Vz_half_new) in enumerate(results_accel):
+                Ur[i] = Ur_new
+                Uz[i] = Uz_new
+                Fr_0[i] = Fr_0_new
+                Fz_0[i] = Fz_0_new
+                Vr_half[i] = Vr_half_new
+                Vz_half[i] = Vz_half_new
+                Ur[i][segment_slices_m[i]["left"]] = 0
 
-                Vr_half[i], Ur[i] = ADR.adr_update_velocity_displacement(
-                    Ur[i], Vr_half[i], Fr[i], cr_n[i], lambda_diag_matrix[i], 1
-                )
-                Vz_half[i], Uz[i] = ADR.adr_update_velocity_displacement(
-                    Uz[i], Vz_half[i], Fz[i], cz_n[i], lambda_diag_matrix[i], 1
-                )
+            for (region_id, direction), neighbor_data in boundary_neighbors_m.items():
+                if direction not in ('top', 'bot'):
+                    continue
+                ghost_indices = neighbor_data["ghost_indices"]  # Index relative to ghost segment (local)
+                phys_indices = neighbor_data["phys_indices"]  # Index relative to target's phys segment (local)
+                target_region = neighbor_data["target_region"]
 
-                for (region_id, direction), neighbor_data in boundary_neighbors_m.items():
-                    if direction not in ('top', 'bot'):
-                        continue
-                    ghost_indices = neighbor_data["ghost_indices"]  # Index relative to ghost segment (local)
-                    phys_indices = neighbor_data["phys_indices"]  # Index relative to target's phys segment (local)
-                    target_region = neighbor_data["target_region"]
+                dr1 = zones[region_id]["dr"]
+                dr2 = zones[target_region]["dr"]
 
-                    dr1 = zones[region_id]["dr"]
-                    dr2 = zones[target_region]["dr"]
+                # Extract the ghost segment slice from this area and the phys segment slice from the target area.
+                sl_ghost = segment_slices_m[region_id][direction]  # 'top' or 'bot'
+                sl_phys = segment_slices_m[target_region]['phys']
 
-                    # Extract the ghost segment slice from this area and the phys segment slice from the target area.
-                    sl_ghost = segment_slices_m[region_id][direction]  # 'top' or 'bot'
-                    sl_phys = segment_slices_m[target_region]['phys']
+                # Retrieve the corresponding view segment
+                # (note: this is a 1D segment vector, ghost_indices/phys_indices are the local indices of this segment)
+                Ur_ghost_seg = Ur[region_id][sl_ghost]
+                Uz_ghost_seg = Uz[region_id][sl_ghost]
+                Ur_phys_seg = Ur[target_region][sl_phys]
+                Uz_phys_seg = Uz[target_region][sl_phys]
 
-                    # Retrieve the corresponding view segment
-                    # (note: this is a 1D segment vector, ghost_indices/phys_indices are the local indices of this segment)
-                    Ur_ghost_seg = Ur[region_id][sl_ghost]
-                    Uz_ghost_seg = Uz[region_id][sl_ghost]
-                    Ur_phys_seg = Ur[target_region][sl_phys]
-                    Uz_phys_seg = Uz[target_region][sl_phys]
+                # Same/different grid interpolation: General functions for reusing temperature fields
+                # (they apply to any scalar field)
+                if abs(dr1 - dr2) < tolerance:
+                    Ur_new_seg = bc.interpolate_temperature_for_same(
+                        Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
+                    )
+                    Uz_new_seg = bc.interpolate_temperature_for_same(
+                        Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
+                    )
+                else:
+                    Ur_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
+                        Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
+                    )
+                    Uz_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
+                        Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
+                    )
 
-                    # Same/different grid interpolation: General functions for reusing temperature fields
-                    # (they apply to any scalar field)
-                    if abs(dr1 - dr2) < tolerance:
-                        Ur_new_seg = bc.interpolate_temperature_for_same(
-                            Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
-                        )
-                        Uz_new_seg = bc.interpolate_temperature_for_same(
-                            Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
-                        )
-                    else:
-                        Ur_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
-                            Ur_ghost_seg, Ur_phys_seg, ghost_indices, phys_indices
-                        )
-                        Uz_new_seg = bc.interpolate_temperature_for_coarse_and_fine(
-                            Uz_ghost_seg, Uz_phys_seg, ghost_indices, phys_indices
-                        )
-
-                    # Write back to this area ghost segment
-                    Ur[region_id][sl_ghost] = Ur_new_seg
-                    Uz[region_id][sl_ghost] = Uz_new_seg
-                    # Mechanical field left boundary displacement set to zero
-                    Ur[i][segment_slices_m[i]["left"]] = 0
+                # Write back to this area ghost segment
+                Ur[region_id][sl_ghost] = Ur_new_seg
+                Uz[region_id][sl_ghost] = Uz_new_seg
+                # Mechanical field left boundary displacement set to zero
 
             Ur_all_curr = np.concatenate([Ur[j] for j in range(n_slices)])
             Uz_all_curr = np.concatenate([Uz[j] for j in range(n_slices)])
@@ -823,7 +820,7 @@ if __name__ == "__main__":
     }
     plot.plot_temperature_contour_in_circle(phys_coords_list_t, dr1, T_phys, radius=r)
     plot.plot_displacement_contours_in_circle(
-        phys_coords_list_m,U_phys,r,  
+        phys_coords_list_m, U_phys, r, dr1,
         titles=('Ur (m)', 'Uz (m)', '|U| (m)'),
         levels=20
     )
