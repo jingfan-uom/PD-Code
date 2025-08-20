@@ -209,10 +209,6 @@ def interpolate_temperature_for_same(
     ghost_indices: np.ndarray,
     phys_indices: np.ndarray
 ) -> np.ndarray:
-
     T_result = T_ghost.copy()
-    for i, g_idx in enumerate(ghost_indices):
-        p_idx = phys_indices[i]
-        T_result[g_idx] = T_phys[p_idx]
-
+    T_result[ghost_indices] = T_phys[phys_indices]
     return T_result
