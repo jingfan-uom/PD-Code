@@ -1,27 +1,17 @@
 import numpy as np
 
 
-def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_mask,dt ,dx_r,dx_z):
-    shape_factor_matrix= np.zeros_like(distance_matrix)
-    shape_factor_r = np.zeros_like(distance_matrix)
-    shape_factor_z = np.zeros_like(distance_matrix)
-    # Avoid division by zero
-    # Compute normalized directional projections
-    shape_factor_r[horizon_mask] = dx_r[horizon_mask] / distance_matrix[horizon_mask]
-    shape_factor_z[horizon_mask] = dx_z[horizon_mask] / distance_matrix[horizon_mask]
-    shape_factor_matrix[horizon_mask] = np.maximum(
-        np.abs(shape_factor_r[horizon_mask]),
-        np.abs(shape_factor_z[horizon_mask])
-    )
+
+def compute_lambda_diag_matrix(partial_area_matrix, distance_matrix, c, horizon_mask):
 
     # Compute contrib_matrix only where mask is True
     contrib_matrix = np.zeros_like(distance_matrix)
-    contrib_matrix[horizon_mask] = shape_factor_matrix[horizon_mask] * c[horizon_mask]/ distance_matrix[horizon_mask]* partial_area_matrix[horizon_mask] * dt **2
+    contrib_matrix[horizon_mask] = (c[horizon_mask] * partial_area_matrix[horizon_mask]) / distance_matrix[horizon_mask]
 
     # Sum row-wise to get K_scalar (only for valid rows)
-    lambda_scalar = np.sum(np.abs(contrib_matrix), axis=1) * 1/2 * dt **2
+    lambda_diag_matrix = np.sum(np.abs(contrib_matrix), axis=1) * 1/4
 
-    return lambda_scalar
+    return lambda_diag_matrix
 
 
 def compute_local_damping_coefficient(F_curr, F_prev, velocity_half, lambda_diag_matrix, U, dt):
