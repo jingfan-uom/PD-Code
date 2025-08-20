@@ -234,30 +234,35 @@ def generate_circle_coordinates(
     return coords_phys, coords_ghost_circle
 
 
-def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3):
+def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3, size,ghost_node):
     """
-    Calculate dr, delta, r, Nr, and length for each region. Supports custom dr and length for the first 3 layers, with automatic growth thereafter.
-
-    Parameters:
-        r : float            - Radius (in meters)
-        n_slices : int       - Total number of layers
-        dr1, dr2, dr3 : float - Particle size for layers 1, 2, and 3
-        dr_l : float         - Upper limit of particle size
-        len1, len2, len3 : float - Thickness of the 1st, 2nd, and 3rd layers
-        total_height : float - Total height (z-direction)
-
-    Returns:
-        List[Dict]: dr, delta, r, Nr, and length for each layer
+    Calculate dr, delta, r, Nr, and length for each region.
+    First 3 layers use custom dr and length.
+    Remaining layers have integer-micron length, last layer gets extra leftover.
     """
-    assert n_slices >= 3, "At least three layers are required to use dr1, dr2, dr3"
-    remaining_layers = n_slices - 3
-    used_height = len1 + len2 + len3
-    remaining_height = 2 * r - used_height
-    assert remaining_height > 0, "len1 + len2 + len3  Cannot exceed total height"
+    # Convert to microns for integer calculation
+    for _ in range(100):  # avoid infinite loop
+        assert n_slices >= 3, "At least three layers are required to use dr1, dr2, dr3"
+        remaining_layers = n_slices - 3
+        used_height = len1 + len2 + len3
+        remaining_height = 2 * r - used_height
+        if remaining_height <= 0:
+            raise ValueError("len1 + len2 + len3 cannot exceed total height")
 
-    len_rest = remaining_height / remaining_layers
+        remaining_height_um = remaining_height / size
+        len_rest_um = int((remaining_height_um + 1e-9) // remaining_layers)  # integer microns
+        leftover_um = remaining_height_um - len_rest_um * remaining_layers
+
+        # Check if not divisible by 2
+        if (len_rest_um / 2 - int(len_rest_um / 2 + 1e-12) > 1e-12) or \
+                (leftover_um / 2 - int(leftover_um / 2 + 1e-12) > 1e-12):
+            n_slices += 1
+        else:
+            break
+
     results = []
-    lock_dr = False  # Is dr locked to dr_l?
+    lock_dr = False  # Lock dr to dr_l if reached
+
     for i in range(n_slices):
         if i == 0:
             dr = dr1
@@ -269,6 +274,7 @@ def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3):
             dr = dr3
             length = len3
         else:
+            # Determine dr
             if not lock_dr:
                 dr_candidate = dr3 * (2 ** (i - 2))
                 if dr_candidate >= dr_l:
@@ -278,11 +284,15 @@ def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3):
                     dr = dr_candidate
             else:
                 dr = dr_l
-            length = len_rest
 
-        Nr = int(r / dr)
-        delta = 3 * dr
+            # Assign length (convert back to meters)
+            if i < n_slices - 1:
+                length = len_rest_um * size
+            else:
+                length = (len_rest_um + leftover_um) * size
 
+        Nr = int(r / dr + 1e-12)
+        delta = ghost_node * dr
         results.append({
             "layer": i,
             "dr": dr,
@@ -292,7 +302,13 @@ def compute_layer_dr_r_nr(r, n_slices, dr1, dr2, dr3, dr_l, len1, len2, len3):
             "length": length
         })
 
-    return results
+    # Optional safety check
+    total_height = sum(layer["length"] for layer in results)
+    assert abs(total_height - 2 * r) < 1e-12, "Total height does not match 2*r"
+    print(f"final n_slices={n_slices}")
+
+    return results,n_slices
+
 
 
 def generate_one_slice_coordinates(
@@ -314,18 +330,21 @@ def generate_one_slice_coordinates(
     dr = zones[slice_id]["dr"]
 
     # r direction range (including ghost)
+
     r_all = np.linspace(
         -ghost_nodes_r * dr + dr / 2,
         R + dr / 2 + (ghost_nodes_r - 1) * dr,
         Nr + 2 * ghost_nodes_r
     )
 
+
     # Single layer thickness in the z direction
     z_bot = 2 * R - sum(zone['length'] for zone in zones[:slice_id + 1])
     z_top = z_bot + zones[slice_id]['length']
 
     # z-direction range (including ghost)
-    Nz = int(dz_layer / dr)
+    Nz = int((dz_layer + 1e-12) / dr)
+
     z_all = np.linspace(
         z_bot - ghost_nodes_r * dr + dr / 2,
         z_top + dr / 2 + (ghost_nodes_r - 1) * dr,
@@ -339,11 +358,10 @@ def generate_one_slice_coordinates(
     # Main area mask
     mask_phys = (
             (coords_all[:, 0] >= 0) &
-            (coords_all[:, 1] >= z_bot) & (coords_all[:, 1] <= z_top + 1e-12) &
-            (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2 + 1e-12)
+            (coords_all[:, 1] >= z_bot) & (coords_all[:, 1] <= z_top ) &
+            (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2 )
     )
     coords_phys = coords_all[mask_phys]
-
 
     # Left ghost
     if r_ghost_left:
@@ -352,30 +370,21 @@ def generate_one_slice_coordinates(
 
 
     if r_ghost_bot and slice_id != n_slices - 1:
-        r_max = np.max(coords_phys[:, 0])
+
         mask_bot = (
-                (coords_all[:, 1] < z_bot) & (coords_all[:, 0] > 0) & (coords_all[:, 0] < r_max + 1e-12) &
-                ((coords_all[:, 0]) ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2)
+                (coords_all[:, 1] < z_bot) &
+                (coords_all[:, 0] > 0) &
+                (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2)
         )
         ghost_dict['bot'] = coords_all[mask_bot]
 
     # top ghost(Generation is only allowed when it is not the topmost slice.)
     if r_ghost_top and slice_id != 0:
-
-        mask_z_top = np.abs(coords_phys[:, 1] - z_top) <= dr/2 + 1e-16
-        has_top_layer = np.any(mask_z_top)
-
-        if has_top_layer:
-            r_max_top = np.max(coords_phys[mask_z_top][:, 0])
-
         mask_top = (
                 (coords_all[:, 1] > z_top) &
                 (coords_all[:, 0] > 0) &
-                ((coords_all[:, 0]) ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2)
+                (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= R ** 2 )
         )
-        if has_top_layer:
-            mask_top &= (coords_all[:, 0] <= r_max_top + 1e-12)
-
         ghost_dict['top'] = coords_all[mask_top]
 
     # Right side ghost (note to widen the z range)
@@ -384,28 +393,24 @@ def generate_one_slice_coordinates(
             # Top layer, z range extends upward
             mask_right = (
                     (coords_all[:, 0] >= 0) &
-                    (coords_all[:, 1] >= z_bot) &
-                    (coords_all[:, 1] <= z_top + 3 * dr) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 + 1e-12) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= (R + 3 * dr) ** 2 + 1e-12)
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 ) &
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 < (R + 3 * dr) ** 2 )
             )
         elif slice_id == n_slices - 1:
             # Bottom layer, z range extends downward
             mask_right = (
                     (coords_all[:, 0] >= 0) &
-                    (coords_all[:, 1] >= z_bot - 3 * dr) &
-                    (coords_all[:, 1] <= z_top) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 + 1e-12) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= (R + 3 * dr) ** 2 + 1e-12)
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 ) &
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 < (R + 3 * dr) ** 2 )
             )
         else:
             # Middle layer, normal range
             mask_right = (
-                    (coords_all[:, 0] >= 0) &
-                    (coords_all[:, 1] >= z_bot) &
-                    (coords_all[:, 1] <= z_top) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 - 1e-12) &
-                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 <= (R + 3 * dr) ** 2 + 1e-12)
+                    (coords_all[:, 0] > 0) &
+                    (coords_all[:, 1] > z_bot - 3 * dr) &
+                    (coords_all[:, 1] < z_top + 3 * dr) &
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 > R ** 2 ) &
+                    (coords_all[:, 0] ** 2 + (coords_all[:, 1] - R) ** 2 < (R + 3 * dr) ** 2 )
             )
         ghost_dict['right'] = coords_all[mask_right]
 
@@ -436,9 +441,12 @@ def generate_one_slice_coordinates(
         plt.xlabel('r')
         plt.ylabel('z')
         plt.title(f'Slice {slice_id}, Z ∈ ({z_bot:.2e}, {z_top:.2e})')
-
         # Set the legend and add total information
-        plt.legend(title=f'Total particles: {total_points}')
+        plt.legend(
+            title=f'Total particles: {total_points}',
+            loc='center left',  # 图例锚点在绘图区的左中
+            bbox_to_anchor=(1.05, 0.5)  # 往右移 1.05 倍轴宽，垂直居中
+        )
         plt.grid(True)
         plt.tight_layout()
         plt.show()
