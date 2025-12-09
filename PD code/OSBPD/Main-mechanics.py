@@ -18,11 +18,11 @@ Tl = 373.65
 L = 333
 
 Lr, Lz = 0.1, 0.1        # Domain size in r and z directions (meters)
-Nr, Nz = 40, 40         # Number of cells in r and z directions
+Nr, Nz = 80, 80         # Number of cells in r and z directions
 dr, dz = Lr / Nr, Lz / Nz  # Cell size in r and z directions
 
 E = 1e9                  # Elastic modulus [Pa]
-nu = 0.33                # Poisson's ratio
+nu = 0.125               # Poisson's ratio
 K = 1.0                  # Thermal conductivity [W/(m·K)]
 alpha = 1.8e-5           # Thermal expansion coefficient [1/K]
 
@@ -31,10 +31,10 @@ ghost_nodes_x = 3        # Number of ghost cells in the x (or r) direction
 ghost_nodes_z = 3        # Number of ghost cells in the z direction
 h = 1
 
-vmod = E / 3 / (1.0 - nu**2)
+vmod = E / 2 / (1.0 - 2 * nu) / (1 + nu)
 smod = E / (2.0 * (1.0 + nu))
 # 体积能量系数 a1 以及热膨胀耦合系数 a2, a3
-a1 = vmod + smod * (nu + 1)**2 / (9 * (2*nu - 1)**2)
+a1 = 0.5 * (vmod - 2 * smod)
 a2 = 4.0 * alpha * a1
 a3 = alpha * a2
 b = 6.0 * smod / (np.pi * h * delta**4)
@@ -138,7 +138,7 @@ def compute_accelerated_velocity(n_x, n_y, horizon_mask, distance_matrix, partia
 
     dforce[horizon_mask] = (4.0 * weight[horizon_mask] * (
             d * dot_xy[horizon_mask]/distance_matrix[horizon_mask] / nlength[horizon_mask] * bulk[horizon_mask] +
-            b * (nlength[horizon_mask] - distance_matrix[horizon_mask])- alpha * dtemp * distance_matrix[horizon_mask]) * scr[horizon_mask]
+            2 * b * (nlength[horizon_mask] - distance_matrix[horizon_mask])- 2 * alpha * dtemp * distance_matrix[horizon_mask]) * scr[horizon_mask]
     )
 
     fx[horizon_mask] = 0.5 * n_x[horizon_mask] * dforce[horizon_mask] * partial_area_matrix[horizon_mask]
@@ -197,7 +197,7 @@ for step in range(nsteps):
     n_z[horizon_mask] = dy_z[horizon_mask] / nlength[horizon_mask]
 
     dilation = pfc.compute_dilation_2d(distance_matrix, partial_area_matrix, horizon_mask, nlength, dot_xy, sij,
-                                            weight, alpha, dtemp, d) * 2*(2*nu-1)/(nu-1)
+                                            weight, alpha, dtemp, d)
     if step == 0:
         Fr_0, Fz_0 = compute_accelerated_velocity(n_r, n_z, horizon_mask, distance_matrix, partial_area_matrix,
                                  weight, dilation, nlength, alpha, rho_s, bz)
