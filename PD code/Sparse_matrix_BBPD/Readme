@@ -1,0 +1,1 @@
+All matrix formats have been updated to Compressed Sparse Row (CSR) format and utilize parallel computing. This has resulted in computational speed improvements of at least several hundred times.
