@@ -54,7 +54,7 @@ n_slices = 5
 Subsequent checks and modifications will be performed 
 in the gc.compute_layer_dr_r_nr function to ensure that the granularity of each layer is reasonable."""
 dt_ADR = 1
-total_time = 1e-5
+total_time = 1e-7
 
 rms = 5e-12
 f_void = 0.2
@@ -585,6 +585,7 @@ if __name__ == "__main__":
     inner_surface_info_list = []
     dx0_edge_m = []
     dz0_edge_m = []
+    pre_m = [None] * n_slices
 
     for i in range(n_slices):
         coords_all_m = coords_all_m_list[i]
@@ -644,6 +645,18 @@ if __name__ == "__main__":
             "mu_edge": mu_edge,  # (nnz,)
             "rho_node": rho_node,
             "rho_edge": rho_edge,
+            "dir_r_edge": dir_r_m,
+            "dir_z_edge": dir_z_m,
+        }
+
+        pre_m[i] = {
+            "mask_core": mask_core_i,
+            "mask_void": mask_void_i,
+            "edge_i": edge_i,
+            "edge_j": edge_j,
+            "alpha_edge": alpha_edge,
+            "s0_edge": s0_edge,
+            "mu_edge": mu_edge,
             "dir_r_edge": dir_r_m,
             "dir_z_edge": dir_z_m,
         }
@@ -761,7 +774,7 @@ if __name__ == "__main__":
             T_bot[i] = T[i][sl["bot"]]
 
         # ✅ Unified handling of boundary conditions
-        T_increment = Tsurr#min(Tinit + (Tsurr - Tinit) * (step1 + 2) / nsteps_th * 5,Tsurr)
+        #T_increment = Tsurr#min(Tinit + (Tsurr - Tinit) * (step1 + 2) / nsteps_th * 5,Tsurr)
         for (region_id, direction), neighbor_data in boundary_neighbors_t.items():
 
             ghost_indices = neighbor_data["ghost_indices"]
@@ -822,8 +835,6 @@ if __name__ == "__main__":
 
         deltaV_total_all = 0
         for i in range(n_slices):
-            T[i] = np.concatenate([T_phys[i], T_left[i], T_right[i], T_top[i], T_bot[i]])
-            materials_m[i]["T_m"] = pfc.filter_array_by_indices_keep_only(T[i], CorrList_T[i])
             dr_i = zones[i]["dr"]
             cell_volume = dr_i * dr_i
             deltaV_phase, deltaV_thermal = pfc.compute_melt_and_thermal_expansion(
@@ -834,6 +845,47 @@ if __name__ == "__main__":
             )
             deltaV_total_all += deltaV_phase + deltaV_thermal
 
+        if f_void <= 1e-10:
+            phi_global = 1.0
+            cavity_vol = 0.0
+        else:
+            cavity_vol = 0.5 * f_void * np.pi * r ** 2
+            phi_global = min(1.0, deltaV_total_all / cavity_vol)
+
+        alpha_core_cal = 0.0 if (f_void > 1e-10 and deltaV_total_all < cavity_vol) else alpha_core
+
+        """ 空腔属性的update"""
+        rho_void = phi_global * rho_l + (1.0 - phi_global) * rho_air
+        Cp_void = phi_global * cl + (1.0 - phi_global) * cair
+        k_void = phi_global * kl + (1.0 - phi_global) * kair
+
+        for i in range(n_slices):
+            # --- 1) 更新 T_m ---
+            Corr = CorrList_T[i]  # 初始化算过，直接用
+            T_m = pfc.filter_array_by_indices_keep_only(T[i], Corr)
+            materials_m[i]["T_m"] = T_m
+
+            # 取初始化预存的常量/拓扑
+            edge_i = pre_m[i]["edge_i"]
+            edge_j = pre_m[i]["edge_j"]
+            mask_core_i = pre_m[i]["mask_core"]
+            mask_void_i = pre_m[i]["mask_void"]
+
+            # --- 2) 重新计算 alpha_edge（按你原来的公式）---
+            # 如果 alpha_core_cal/alpha_shell 未来要做成温度函数，也可以在这里用 T_m 来更新它们
+            alpha_node = np.where(mask_core_i, alpha_core_cal, alpha_shell).astype(np.float64)
+            alpha_edge = 0.5 * (alpha_node[edge_i] + alpha_node[edge_j])
+            materials_m[i]["alpha_edge"] = alpha_edge
+
+            # --- 3) 重新计算 rho_node / rho_edge ---
+            rho_node, rho_edge = cf.get_density(
+                Corr, mask_core_i, mask_void_i,
+                rho_s, rho_l, Ts, Tl,
+                rho_shell, rho_void,
+                edge_i, edge_j
+            )
+            materials_m[i]["rho_node"] = rho_node
+            materials_m[i]["rho_edge"] = rho_edge
         """6. Definition of physical strength: Note that the average value of the elastic modulus is taken here."""
 
         phi_regions = {}
