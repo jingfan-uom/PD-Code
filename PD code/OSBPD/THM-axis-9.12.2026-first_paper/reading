@@ -1,1 +1,2 @@
-The code structure has been improved—it has been changed from the previous multi-region approach to a shell-core mesh and a shell-only mesh. Additionally, the current model is suitable for calculating cases where KlE and KsE are far from zero.
+The code structure has been improved—it has been changed from the previous multi-region approach to a shell-core mesh and a shell-only mesh. 
+Additionally, the current model is suitable for calculating cases where KlE and KsE are far from one.
